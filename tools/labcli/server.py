@@ -118,7 +118,8 @@ async def run_readonly_cmd(node: str, command: str) -> str:
     except ValueError as e:
         return f"REFUSED: {e}"
     return await _run(["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=10", "-o", "StrictHostKeyChecking=yes",
-                       f"{n['ssh_user']}@{n['ssh_host']}", "--", shlex.join(argv)])
+                       f"{n['ssh_user']}@{n['ssh_host']}", "--",
+                       "env PATH=/opt/rocm/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin " + shlex.join(argv)])
 
 async def _ipmi(node, *args):
     n = _node(node)

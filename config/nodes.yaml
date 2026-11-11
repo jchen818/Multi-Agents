@@ -1,0 +1,7 @@
+nodes:
+  mitacai:                 # name the agents will use
+    ssh_host: 10.46.252.115
+    ssh_user: mitac
+    bmc_host: 10.46.252.13
+  # add one entry per test node
+

@@ -5,7 +5,7 @@ from urllib.parse import urlparse
 
 MAX_OUTPUT_CHARS = int(os.getenv("MAX_TOOL_OUTPUT_CHARS", "8000"))
 DEFAULT_TIMEOUT = 60
-TIMEOUTS = {"redfish": 180, "searxng": 30}
+TIMEOUTS = {"redfish": 180, "searxng": 30, "labcli": 90}
 KILL_FILE = Path(os.getenv("AGENTS_KILL_FILE", "/home/mitac/Multi-Agents/state/KILL"))
 
 def killed() -> bool:

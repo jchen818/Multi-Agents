@@ -1,0 +1,6 @@
+nodes:
+  ubuntu-node:                 # name the agents will use
+    ssh_host: 10.46.252.18
+    ssh_user: mitac
+    bmc_host: 10.46.252.103
+  # add one entry per test node

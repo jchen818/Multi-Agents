@@ -5,3 +5,4 @@ state/
 logs/
 evals/**/results.json
 __pycache__/
+secrets/

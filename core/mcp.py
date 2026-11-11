@@ -1,0 +1,27 @@
+from langchain_mcp_adapters.client import MultiServerMCPClient
+from langchain_mcp_adapters.tools import load_mcp_tools
+
+TOOLS = "/home/mitac/Multi-Agents/tools"
+SERVERS = {
+    "searxng": {"transport": "stdio", "command": f"{TOOLS}/run_searxng_mcp.sh", "args": []},
+    "redfish": {"transport": "stdio", "command": f"{TOOLS}/run_redfish_mcp.sh", "args": []},
+}
+ALLOWED = {
+    "searxng": {"search_web", "search_news", "fetch_url"},
+    "redfish": {"list_bmcs", "list_systems", "get_system", "list_chassis",
+                "get_health_summary", "get_thermal", "get_power", "get_sensors",
+                "get_component_inventory", "get_firmware_inventory",
+                "get_boot_config", "get_log_entries"},
+}
+client = MultiServerMCPClient(SERVERS)
+
+async def get_tools(servers=SERVERS):
+    out = []
+    for name in servers:
+        out += [t for t in await client.get_tools(server_name=name) if t.name in ALLOWED[name]]
+    return out
+
+# Agent runs: one session per server, e.g.
+# async with client.session("redfish") as s:
+#     tools = [t for t in await load_mcp_tools(s) if t.name in ALLOWED["redfish"]]
+

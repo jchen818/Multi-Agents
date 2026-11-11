@@ -1,0 +1,7 @@
+agents.env
+agents.env*
+.venv/
+state/
+logs/
+evals/**/results.json
+__pycache__/

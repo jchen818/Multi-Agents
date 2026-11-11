@@ -1,5 +1,5 @@
 import asyncio
-from langgraph.prebuilt import create_react_agent
+from langchain.agents import create_agent
 from langfuse import get_client
 from langfuse.langchain import CallbackHandler
 from langchain_mcp_adapters.tools import load_mcp_tools
@@ -13,7 +13,7 @@ TOOLS = {"list_bmcs", "list_systems", "get_system"}
 async def main():
     async with client.session("redfish") as s:
         tools = [t for t in await load_mcp_tools(s) if t.name in TOOLS]
-        agent = create_react_agent(get_model(), tools, prompt=SYSTEM)
+        agent = create_agent(get_model(), tools, system_prompt=SYSTEM)
         res = await agent.ainvoke(
             {"messages": [("user", "Which BMCs can you reach, and what are the model and power state of mitacai?")]},
             config={"callbacks": [CallbackHandler()], "recursion_limit": 31, "run_name": "hello-lab-ops"})

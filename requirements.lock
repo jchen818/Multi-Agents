@@ -27,6 +27,7 @@ jsonpatch==1.47
 jsonpointer==3.12
 jsonschema==4.26.0
 jsonschema-specifications==2025.9.1
+langchain==1.5.0
 langchain-anthropic==1.7.10
 langchain-core==1.8.0
 langchain-mcp-adapters==0.3.2
@@ -82,6 +83,7 @@ typing-inspection==0.4.5
 typing_extensions==4.16.0
 urllib3==2.8.0
 uuid_utils==0.19.0
+uv==0.13.7
 uvicorn==0.54.0
 websockets==17.4
 wrapt==2.5.2

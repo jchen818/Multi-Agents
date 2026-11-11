@@ -13,7 +13,7 @@ ALLOWED = {
                 "get_health_summary", "get_thermal", "get_power", "get_sensors",
                 "get_component_inventory", "get_firmware_inventory",
                 "get_boot_config", "get_log_entries"},
-    "labcli": {"list_nodes", "run_readonly_cmd", "get_ipmi_sel", "get_ipmi_fru"},
+    "labcli": {"list_nodes", "run_readonly_cmd", "get_ipmi_sel", "get_ipmi_fru","get_ipmi_sensors"},
 }
 client = MultiServerMCPClient(SERVERS)
 

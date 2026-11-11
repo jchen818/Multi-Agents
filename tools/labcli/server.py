@@ -146,6 +146,19 @@ async def get_ipmi_fru(node: str) -> str:
     except ValueError as e:
         return f"REFUSED: {e}"
 
+@mcp.tool()
+async def get_ipmi_sensors(node: str, sensor_type: str = "Fan") -> str:
+    """Fast sensor readings from a node's BMC via IPMI SDR. sensor_type: Fan, Temperature, Voltage,
+    Current or 'Power Supply'. Prefer this over Redfish get_thermal for quick fan/temperature checks."""
+    allowed = {"Fan", "Temperature", "Voltage", "Current", "Power Supply"}
+    if sensor_type not in allowed:
+        return f"REFUSED: sensor_type must be one of {sorted(allowed)}"
+    try:
+        return await _ipmi(node, "sdr", "type", sensor_type)
+    except ValueError as e:
+        return f"REFUSED: {e}"
+
+
 if __name__ == "__main__":
     mcp.run()   # stdio
 

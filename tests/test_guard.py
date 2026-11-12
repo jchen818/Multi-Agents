@@ -43,3 +43,20 @@ def test_kill_switch(tmp_path):
 def test_middleware_imports():
     assert len(g.limit_middleware()) == 2
 
+
+def test_unknown_node_and_endpoint_refused():
+    schema = {"type": "object", "properties": {"node": {"type": "string"}, "endpoint": {"type": "string"}}}
+    calls = []
+    async def ok(**kw): calls.append(kw); return ("fine", None)
+    t = g.guard_tool(StructuredTool(name="t", description="test", args_schema=schema, coroutine=ok,
+                                    response_format="content_and_artifact"), "other")
+    g.KILL_FILE = g.Path("/nonexistent/KILL")
+    g.set_known(nodes=["mitacai"], endpoints=["mitacai", "nfs-server-2"])
+    try:
+        assert "REFUSED" in run(t, {"node": "mi325x-7"})
+        assert "REFUSED" in run(t, {"endpoint": "mi999"})
+        assert calls == []                              # refused before reaching the server
+        assert "fine" in run(t, {"node": "mitacai"})
+        assert "fine" in run(t, {"endpoint": "nfs-server-2"})
+    finally:
+        g.set_known()                                   # reset for other tests

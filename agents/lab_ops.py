@@ -8,13 +8,14 @@ from langfuse import get_client
 from langfuse.langchain import CallbackHandler
 from core.models import get_model
 from core.mcp import client, ALLOWED
-from core.guard import guard_tool, endpoint_names, limit_middleware, run_with_deadline, to_text
+from core.guard import guard_tool, endpoint_names, limit_middleware, run_with_deadline, set_known, to_text
 
 SERVERS = ("redfish", "labcli", "searxng")
 
 PROMPT = """You are the Lab Ops assistant for MiTAC AI racks (AMD Instinct MI350X/MI325X).
 Configured Redfish BMC endpoints: {endpoints}. Nodes reachable by SSH/IPMI (labcli): {nodes}.
-Use these names exactly. If asked about anything else, say it is not configured; do not call a tool for it.
+Use these names exactly. Before any tool call, check that its node or endpoint is in these lists.
+If the user names any other system, reply that it is not configured, list the configured names, and call no tool.
 
 How to work:
 - Answer from tool output only; never guess values. Cite the tool behind each fact, e.g. [get_thermal].
@@ -35,6 +36,7 @@ async def build(stack):
     eps = await endpoint_names(tools)
     lst = next(t for t in tools if t.name == "list_nodes")
     nodes = re.findall(r"^([A-Za-z0-9_.-]+):\s*$", to_text(await lst.ainvoke({})), re.M)
+    set_known(nodes=nodes, endpoints=eps)   # guard refuses any other node/endpoint before it reaches a server
     agent = create_agent(
         get_model(), tools,
         system_prompt=PROMPT.format(endpoints=", ".join(eps) or "none", nodes=", ".join(nodes) or "none"),

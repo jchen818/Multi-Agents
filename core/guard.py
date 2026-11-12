@@ -8,6 +8,21 @@ DEFAULT_TIMEOUT = 60
 TIMEOUTS = {"redfish": 180, "searxng": 30, "labcli": 90}
 KILL_FILE = Path(os.getenv("AGENTS_KILL_FILE", "/home/mitac/Multi-Agents/state/KILL"))
 
+# Configured names per argument. Filled by the agent at start (set_known); empty = no check.
+KNOWN = {"node": set(), "endpoint": set()}
+
+def set_known(nodes=(), endpoints=()):
+    KNOWN["node"] = set(nodes)
+    KNOWN["endpoint"] = set(endpoints)
+
+def unknown_name(kwargs):
+    """Reason string if a node/endpoint argument is not a configured name, else None."""
+    for key, names in KNOWN.items():
+        value = kwargs.get(key)
+        if names and value not in (None, "") and value not in names:
+            return f"{key} '{value}' is not configured. Configured {key}s: {', '.join(sorted(names))}"
+    return None
+
 def killed() -> bool:
     return KILL_FILE.exists()
 
@@ -40,7 +55,7 @@ def blocked_url(url: str):
     return None
 
 def guard_tool(tool, server: str):
-    """Wrap a tool in place: kill switch, URL policy, timeout, output cap, errors as text."""
+    """Wrap a tool in place: kill switch, configured-name check, URL policy, timeout, output cap, errors as text."""
     orig = tool.coroutine
     timeout = TIMEOUTS.get(server, DEFAULT_TIMEOUT)
     pair = getattr(tool, "response_format", "content") == "content_and_artifact"
@@ -49,6 +64,9 @@ def guard_tool(tool, server: str):
     async def guarded(**kwargs):
         if killed():
             return ret("REFUSED: agents are stopped (kill switch is set)")
+        why = unknown_name(kwargs)
+        if why:
+            return ret(f"REFUSED: {why}")
         if tool.name == "fetch_url":
             why = blocked_url(str(kwargs.get("url", "")))
             if why:

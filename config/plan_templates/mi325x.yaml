@@ -1,0 +1,111 @@
+# MI325X validation plan template - source for the Phase 2 planner.
+# Recipes and tests are from `agfhc --list` on mitacai, Nov 12 2026 (AGFHC 1.30.2, package mi300,
+# tests under /opt/amd/agfhc/tests/mi325x, recipes under /opt/amd/agfhc/recipes/mi325x).
+# Durations are AGFHC's own recipe titles ("~5m", "~1h"); recipes without one show "unknown" and the planner
+# reads the real test list (list_recipe_tests) before asking for approval.
+platform: mi325x
+target_stack: {rocm: "7.2.1", agfhc: "1.30.2", bkc: "25.06.08"}
+
+agfhc:
+  bin: /opt/amd/agfhc/agfhc
+  run_cmd: "{bin} -r {recipe} {extra}"
+  list_cmd: "{bin} --list"
+  version_cmd: "{bin} --version"
+  log_root: /root/agfhc/logs              # AGFHC writes agfhc_<YYYYmmdd-HHMMSS>/ here (results.json, error.json, tests/)
+  run_root: /var/tmp/agfhc-runs           # per-run dir on the DUT: console.log, rc, versions.txt, inventory.tsv, ...
+  sudoers: "<user> ALL=(root) NOPASSWD: /opt/amd/agfhc/agfhc, /usr/bin/dmesg, /usr/bin/pkill, /usr/bin/tar, /usr/bin/ipmitool"
+
+archive:
+  host: nfs-server-2
+  dir: /srv/nfs/logs                      # AGFHC_<YYYYmmdd_HHMMSS>/ with report.html, summary.json, logs/
+  timezone: America/Los_Angeles
+
+# Hard preconditions - the executor refuses to start if any fails (the Open WebUI tool only warned).
+preconditions:
+  - id: test_node
+    rule: "node is marked `test_node: true` in config/nodes.yaml (never mitacai or other infra hosts)"
+  - id: gpus_idle
+    rule: "every GPU < 5% VRAM allocated and no KFD processes (rocm-smi --showmemuse / --showpids)"
+  - id: no_active_run
+    rule: "no /var/tmp/agfhc-runs/.host.lock on the node"
+  - id: versions_recorded
+    rule: "AGFHC, ROCm, amdgpu, amd-smi, kernel, OS, GPU model/count, VBIOS read live and shown in the plan"
+  - id: kernel_clean
+    rule: "no amdgpu/RAS/AER/XGMI/MCE errors in dmesg before start (reported; operator decides at approval)"
+
+# Plan stages. The planner picks a tier per the request; gates run before and after AGFHC.
+stages:
+  - id: preflight
+    action: preflight            # versions table, GPU idle check, active-run lock, recent kernel errors
+  - id: gate_before
+    action: pytest_suite         # gpu-automation-test TC-GPU-001..005 (enumeration, ISA, idle health, VRAM, topology)
+    on_fail: stop                # don't stress a node that fails the basic checks
+  - id: agfhc
+    action: agfhc_recipes        # one or more recipes from the chosen tier, one at a time (one run per host)
+    on_fail: continue_then_analyze
+  - id: gate_after
+    action: pytest_suite
+  - id: report
+    action: analyze_and_archive  # analyze, archive to NFS, report.html with the agent's analysis
+
+tiers:
+  smoke:
+    purpose: quick health check after bring-up or a driver/firmware change
+    recipes:
+      - {name: all_lvl1, duration: ~5m, title: "A ~5m check across system"}
+  subsystem_lvl1:
+    purpose: ~5 min per subsystem, to localize a problem
+    recipes:
+      - {name: hbm_lvl1, duration: ~5m}
+      - {name: xgmi_lvl1, duration: ~5m}
+      - {name: pcie_lvl1, duration: ~5m}
+      - {name: dma_lvl1, duration: ~5m}
+      - {name: gfx_lvl1, duration: ~5m}
+      - {name: acf_lvl1, duration: ~5m}
+  functional:
+    purpose: every test once, links, thermal solution
+    recipes:
+      - {name: single_pass, duration: unknown, title: "Run all tests once"}
+      - {name: hsio, duration: unknown, title: "Run all HSIO tests once"}
+      - {name: thermal, duration: unknown, title: "Verify thermal solution"}
+  standard:
+    purpose: validation campaign default
+    recipes:
+      - {name: all_lvl2, duration: ~10m}
+      - {name: all_lvl3, duration: ~30m}
+  extended:
+    purpose: longer stress before sign-off
+    recipes:
+      - {name: all_lvl4, duration: ~1h}
+      - {name: all_lvl5, duration: ~2h}
+  performance:
+    purpose: bandwidth / compute performance
+    recipes:
+      - {name: all_perf, duration: unknown, title: "Run all performance based tests"}
+      - {name: rochpl_isolation, duration: unknown, title: "Run rocHPL on each GPU"}
+  burnin:
+    purpose: soak; needs an explicit time window in the request
+    recipes:
+      - {name: all_burnin_4h, duration: ~4h}
+      - {name: all_burnin_12h, duration: ~12h}
+      - {name: all_burnin_24h, duration: ~24h}
+      - {name: hbm_burnin_8h, duration: ~8h}
+      - {name: hbm_burnin_24h, duration: ~24h}
+
+# Allowlist = every recipe AGFHC 1.30.2 defines for mi325x. Anything else is refused.
+allowed_recipes: [
+  acf_lvl1, acf_lvl2, acf_lvl3, acf_lvl4,
+  all_burnin_12h, all_burnin_24h, all_burnin_4h,
+  all_lvl1, all_lvl2, all_lvl3, all_lvl4, all_lvl5, all_perf,
+  dma_lvl1, dma_lvl2, dma_lvl3, dma_lvl4,
+  gfx_lvl1, gfx_lvl2, gfx_lvl3, gfx_lvl4,
+  hbm_burnin_24h, hbm_burnin_8h, hbm_lvl1, hbm_lvl2, hbm_lvl3, hbm_lvl4, hbm_lvl5,
+  hsio, pcie_lvl1, pcie_lvl2, pcie_lvl3, pcie_lvl4,
+  rochpl_isolation, single_pass, thermal,
+  xgmi_lvl1, xgmi_lvl2, xgmi_lvl3, xgmi_lvl4]
+
+# The 30 AGFHC tests for mi325x (for planner context and triage).
+tests: [athub, dma_bidi_peak, dma_d2h_peak, dma_h2d_peak, gfx_bf16ri, gfx_bf16tf, gfx_dgemm, gfx_fp16ri,
+        gfx_fp16tf, gfx_fp8ri, gfx_fp8tf, gfx_maxpower, gfx_sgemm, hbm, hbm_bw, hbm_ds, hbm_ds_ntd, hbm_remix2,
+        hbm_s16, hbm_s16_ds, mall, minihpl, pcie_bidi_peak, pcie_link_status, pcie_unidi_peak, rochpl,
+        roctwitch, sleep, sprites, xgmi_a2a]

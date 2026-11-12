@@ -1,0 +1,38 @@
+#!/usr/bin/env bash
+# Pre-push gate. Install once:  ln -sf ../../scripts/pre-push .git/hooks/pre-push
+#  1. unit tests (always, seconds)
+#  2. smoke eval (always, seconds)
+#  3. Lab Ops live eval (~4 min) only if agents/, core/, tools/ or evals/lab_ops/ changed; needs >= 27/30
+set -uo pipefail
+root=$(git rev-parse --show-toplevel); cd "$root"
+source .venv/bin/activate
+set -a; source agents.env; set +a
+export PROMPTFOO_DISABLE_TELEMETRY=1 PROMPTFOO_DISABLE_UPDATE=1
+fail() { echo "pre-push: $1 - push blocked"; exit 1; }
+
+python -m pytest -q tests/ >/tmp/prepush-pytest.log 2>&1 || fail "unit tests failed (see /tmp/prepush-pytest.log)"
+echo "pre-push: unit tests ok"
+
+(cd evals/smoke && npx -y promptfoo@latest eval -c promptfooconfig.yaml --no-cache >/tmp/prepush-smoke.log 2>&1) \
+  || fail "smoke eval failed (see /tmp/prepush-smoke.log)"
+echo "pre-push: smoke eval ok"
+
+# Files changed in the commits being pushed (compare with upstream if it exists, else last commit)
+changed=$(git diff --name-only '@{u}..HEAD' 2>/dev/null || git diff --name-only HEAD~1..HEAD)
+if echo "$changed" | grep -qE '^(agents/|core/|tools/|evals/lab_ops/)'; then
+  echo "pre-push: agent files changed - running Lab Ops eval (~4 min)"
+  (cd evals/lab_ops && npx -y promptfoo@latest eval -c promptfooconfig.yaml --no-cache -o /tmp/prepush-labops.json \
+     >/tmp/prepush-labops.log 2>&1)
+  python - <<'PY' || fail "Lab Ops eval below 27/30 (see /tmp/prepush-labops.json)"
+import json, sys
+rs = json.load(open("/tmp/prepush-labops.json"))["results"]["results"]
+ok = sum(r["success"] for r in rs)
+print(f"pre-push: Lab Ops eval {ok}/{len(rs)}")
+for r in rs:
+    if not r["success"]:
+        print("  FAIL:", r["vars"]["question"][:70], "->", (r.get("gradingResult") or {}).get("reason"))
+sys.exit(0 if ok >= 27 else 1)
+PY
+else
+  echo "pre-push: no agent files changed - Lab Ops eval skipped"
+fi

@@ -1,12 +1,25 @@
+import os
 from langchain_mcp_adapters.client import MultiServerMCPClient
 from langchain_mcp_adapters.tools import load_mcp_tools
 
 TOOLS = "/home/mitac/Multi-Agents/tools"
+
+
+NO_PASSTHROUGH = {"AGFHC_MODE"}   # dry-run vs live is set in agents.env only, never from a command line
+
+
+def passthrough_env(prefixes=("AGFHC_", "SIM_")) -> dict:
+    """Variables a stdio server should see from the caller. The MCP client otherwise passes only HOME, PATH,
+    USER and similar, so e.g. SIM_SCENARIO=pass on the planner's command line would not reach the agfhc server."""
+    return {k: v for k, v in os.environ.items() if k.startswith(prefixes) and k not in NO_PASSTHROUGH}
+
+
 SERVERS = {
     "searxng": {"transport": "stdio", "command": f"{TOOLS}/run_searxng_mcp.sh", "args": []},
     "redfish": {"transport": "stdio", "command": f"{TOOLS}/run_redfish_mcp.sh", "args": []},
     "labcli": {"transport": "stdio", "command": f"{TOOLS}/run_labcli_mcp.sh", "args": []},
-    "agfhc": {"transport": "stdio", "command": f"{TOOLS}/run_agfhc_mcp.sh", "args": []},   # Phase 2; not given to Lab Ops
+    "agfhc": {"transport": "stdio", "command": f"{TOOLS}/run_agfhc_mcp.sh", "args": [],
+              "env": passthrough_env()},   # Phase 2; not given to Lab Ops
 }
 ALLOWED = {
     "searxng": {"search_web", "search_news", "fetch_url"},

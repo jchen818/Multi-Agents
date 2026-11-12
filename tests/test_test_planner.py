@@ -245,3 +245,24 @@ def test_index_is_used_and_paths_outside_the_store_are_ignored(tmp_path):
     assert agent == "test-planner" and md["type"] == "procedure" and "xgmi_lvl1" in text
     found = st.find("anything", "mi325x", dryrun=False)
     assert [r["id"] for r in found] == [rec["id"]]
+
+
+def test_rerun_of_same_recipe_updates_history_not_a_new_file(env, monkeypatch):
+    monkeypatch.setenv("SIM_SCENARIO", "pass")
+    m = FakeModel(plans=[plan("all_lvl1")])
+    g = build_graph(env["tools"], m, m, InMemorySaver(), poll_s=0.5, recipes=env["store"])
+    drive(g, {"requirements": "quick health check", "node": "sim"}, [{"action": "approve"}])
+    (f,) = recipe_files(env["store"])
+    rid = yaml.safe_load(f.read_text())["id"]
+    monkeypatch.setenv("SIM_SCENARIO", "fail")
+    m2 = FakeModel(plans=[Plan(tier="smoke", based_on=rid, steps=[{"recipe": "all_lvl1", "reason": "r"}])])
+    g2 = build_graph(env["tools"], m2, m2, InMemorySaver(), poll_s=0.5, recipes=env["store"])
+    out, _ = drive(g2, {"requirements": "quick health check again", "node": "sim"}, [{"action": "approve"}], thread="t2")
+    assert recipe_files(env["store"]) == [f] and "Recipe updated (used 2x)" in out["report"]
+    rec = yaml.safe_load(f.read_text())
+    assert rec["uses"] == 2 and [h["outcome"][0]["verdict"] for h in rec["history"]] == ["PASS", "FAIL"]
+    # a changed step list is a new recipe
+    m3 = FakeModel(plans=[Plan(tier="smoke", based_on=rid, steps=[{"recipe": "all_lvl2", "reason": "r"}])])
+    g3 = build_graph(env["tools"], m3, m3, InMemorySaver(), poll_s=0.5, recipes=env["store"])
+    drive(g3, {"requirements": "quick health check", "node": "sim"}, [{"action": "approve"}], thread="t3")
+    assert len(recipe_files(env["store"])) == 2

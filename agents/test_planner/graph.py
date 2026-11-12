@@ -283,9 +283,10 @@ def build_graph(tools: dict, planner_model, writer_model, checkpointer, poll_s: 
             tpl = template(state["platform"])
             rec = recipes.save(platform=state["platform"], bkc=str((tpl.get("target_stack") or {}).get("bkc", "unknown")),
                                requirements=state["requirements"], plan=state["plan"], results=ran,
-                               versions=state.get("versions") or {}, node=state["node"], dryrun=state.get("dryrun", True))
+                               versions=state.get("versions") or {}, node=state["node"], dryrun=state.get("dryrun", True),
+                               based_on=next((r for r in state.get("recipes") or [] if r["id"] == state["plan"].get("based_on")), None))
             saved = rec["path"]
-            lines.append(f"\nRecipe saved: `{saved}`" + (f" (index error: {rec['index_error']})" if rec.get("index_error") else ""))
+            lines.append((f"\nRecipe updated (used {rec['uses']}x): `{saved}`" if rec.get("updated") else f"\nRecipe saved: `{saved}`") + (f" (index error: {rec['index_error']})" if rec.get("index_error") else ""))
         if state.get("last_error"):
             lines.append(f"\nExecution issue: {state['last_error']}")
         lines.append(f"\n**Status: {status}**" + (" (hand off to triage)" if failed else ""))

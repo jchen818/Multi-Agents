@@ -6,6 +6,7 @@ import sys
 from pathlib import Path
 
 import pytest
+import yaml
 from langchain_core.messages import AIMessage
 from langchain_core.tools import StructuredTool
 from pydantic import create_model
@@ -16,6 +17,7 @@ REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO))
 sys.path.insert(0, str(REPO / "tools" / "agfhc"))
 from core.guard import guard_tool  # noqa: E402
+from core.recipes import RecipeStore  # noqa: E402
 from agents.test_planner.graph import build_graph, validate_plan, template, Plan, Replan  # noqa: E402
 
 TOOLS = ["list_test_nodes", "preflight", "list_recipe_tests", "plan_run", "start_run",
@@ -34,14 +36,15 @@ class FakeModel:
 
     def __init__(self, plans=(), replans=(), text="Analysis: see failure details."):
         self.q = {Plan: list(plans), Replan: list(replans)}
-        self.text, self.calls = text, {Plan: 0, Replan: 0}
+        self.text, self.calls, self.prompts = text, {Plan: 0, Replan: 0}, []
 
     def with_structured_output(self, schema, method=None):
         outer = self
 
         class R:
-            async def ainvoke(self, _msgs):
+            async def ainvoke(self, msgs):
                 outer.calls[schema] += 1
+                outer.prompts.append(msgs[-1][1])
                 return outer.q[schema].pop(0)
         return R()
 
@@ -69,7 +72,8 @@ def env(tmp_path, monkeypatch):
         tool = guard_tool(StructuredTool.from_function(coroutine=coro, name=name, description=name,
                                                        args_schema=_schema(fn)), "agfhc")
         return lambda **kw: tool.ainvoke(kw)
-    return {"tools": {n: wrap(n, getattr(srv, n)) for n in TOOLS}, "tmp": tmp_path}
+    return {"tools": {n: wrap(n, getattr(srv, n)) for n in TOOLS}, "tmp": tmp_path,
+            "store": RecipeStore(tmp_path / "recipes")}
 
 
 def plan(*recipes, tier="smoke"):
@@ -94,7 +98,7 @@ def archives(tmp):
 def test_approved_fail_run_hands_off(env, monkeypatch):
     monkeypatch.setenv("SIM_SCENARIO", "fail")
     m = FakeModel(plans=[plan("all_lvl1")])
-    g = build_graph(env["tools"], m, m, InMemorySaver(), poll_s=0.5)
+    g = build_graph(env["tools"], m, m, InMemorySaver(), poll_s=0.5, recipes=env["store"])
     out, seen = drive(g, {"requirements": "quick health check", "node": "sim"}, [{"action": "approve"}])
     assert "all_lvl1" in seen[0]["markdown"] and "~5m" in seen[0]["markdown"]
     assert out["status"] == "FAILED" and "hand off to triage" in out["report"]
@@ -106,7 +110,7 @@ def test_approved_fail_run_hands_off(env, monkeypatch):
 def test_two_step_pass_is_done(env, monkeypatch):
     monkeypatch.setenv("SIM_SCENARIO", "pass")
     m = FakeModel(plans=[plan("hbm_lvl1", "xgmi_lvl1", tier="subsystem_lvl1")])
-    g = build_graph(env["tools"], m, m, InMemorySaver(), poll_s=0.5)
+    g = build_graph(env["tools"], m, m, InMemorySaver(), poll_s=0.5, recipes=env["store"])
     out, _ = drive(g, {"requirements": "check HBM and XGMI", "node": "sim"}, [{"action": "approve"}])
     assert out["status"] == "DONE", out["report"]
     assert [r["recipe"] for r in out["results"]] == ["hbm_lvl1", "xgmi_lvl1"]
@@ -115,7 +119,7 @@ def test_two_step_pass_is_done(env, monkeypatch):
 
 def test_reject_starts_nothing(env):
     m = FakeModel(plans=[plan("all_lvl1")])
-    g = build_graph(env["tools"], m, m, InMemorySaver(), poll_s=0.5)
+    g = build_graph(env["tools"], m, m, InMemorySaver(), poll_s=0.5, recipes=env["store"])
     out, _ = drive(g, {"requirements": "x", "node": "sim"}, [{"action": "reject", "reason": "wrong node"}])
     assert out["status"] == "REJECTED" and not out["results"]
     assert not (env["tmp"] / "sim" / "agfhc-runs").exists()
@@ -123,7 +127,7 @@ def test_reject_starts_nothing(env):
 
 def test_invalid_plan_never_reaches_approval(env):
     m = FakeModel(plans=[plan("rm_everything"), plan("all_lvl9")])
-    g = build_graph(env["tools"], m, m, InMemorySaver(), poll_s=0.5)
+    g = build_graph(env["tools"], m, m, InMemorySaver(), poll_s=0.5, recipes=env["store"])
     out, seen = drive(g, {"requirements": "x", "node": "sim"}, [])
     assert out["status"] == "FAILED" and not seen and m.calls[Plan] == 2
 
@@ -131,7 +135,7 @@ def test_invalid_plan_never_reaches_approval(env):
 def test_bad_edit_is_refused_then_approved(env, monkeypatch):
     monkeypatch.setenv("SIM_SCENARIO", "pass")
     m = FakeModel(plans=[plan("all_lvl1")])
-    g = build_graph(env["tools"], m, m, InMemorySaver(), poll_s=0.5)
+    g = build_graph(env["tools"], m, m, InMemorySaver(), poll_s=0.5, recipes=env["store"])
     out, seen = drive(g, {"requirements": "quick check", "node": "sim"},
                       [{"action": "edit", "recipes": ["all_burnin_24h"]}, {"action": "approve"}])
     assert "Edit refused" in seen[1]["markdown"] and "burn-in" in seen[1]["markdown"]
@@ -140,7 +144,7 @@ def test_bad_edit_is_refused_then_approved(env, monkeypatch):
 
 def test_real_node_refused_in_dryrun(env):
     m = FakeModel()
-    g = build_graph(env["tools"], m, m, InMemorySaver(), poll_s=0.5)
+    g = build_graph(env["tools"], m, m, InMemorySaver(), poll_s=0.5, recipes=env["store"])
     out, seen = drive(g, {"requirements": "x", "node": "mitacai"}, [])
     assert out["status"] == "REFUSED" and not seen and m.calls[Plan] == 0
 
@@ -148,7 +152,7 @@ def test_real_node_refused_in_dryrun(env):
 def test_execution_error_replans_then_fails(env, monkeypatch):
     monkeypatch.setenv("SIM_GPU_BUSY", "1")
     m = FakeModel(plans=[plan("all_lvl1")], replans=[Replan(action="retry", reason="wait"), Replan(action="retry", reason="again")])
-    g = build_graph(env["tools"], m, m, InMemorySaver(), poll_s=0.5)
+    g = build_graph(env["tools"], m, m, InMemorySaver(), poll_s=0.5, recipes=env["store"])
     out, _ = drive(g, {"requirements": "x", "node": "sim"}, [{"action": "approve"}])
     assert out["status"] == "FAILED" and "stopped after 2 replans" in out["report"]
     assert m.calls[Replan] == 2 and not archives(env["tmp"])
@@ -160,3 +164,84 @@ def test_validate_plan_rules():
     assert "burn-in" in validate_plan({"steps": [{"recipe": "all_burnin_4h"}]}, tpl, "standard run")
     assert validate_plan({"steps": [{"recipe": "all_burnin_4h"}]}, tpl, "4h burn-in") == ""
     assert validate_plan({"steps": [{"recipe": "all_lvl2"}]}, tpl, "") == ""
+
+
+# ------------------------------------------------------------------ procedural memory (2.3)
+
+def recipe_files(store, dryrun=True):
+    d = store.base / "dryrun" if dryrun else store.base
+    return sorted(d.glob("*/*/*.yaml"))
+
+
+def test_executed_plan_is_saved_and_reused(env, monkeypatch):
+    monkeypatch.setenv("SIM_SCENARIO", "pass")
+    m = FakeModel(plans=[plan("hbm_lvl1", "xgmi_lvl1", tier="subsystem_lvl1")])
+    g = build_graph(env["tools"], m, m, InMemorySaver(), poll_s=0.5, recipes=env["store"])
+    out, _ = drive(g, {"requirements": "check HBM and XGMI after BKC update", "node": "sim"}, [{"action": "approve"}])
+    (f,) = recipe_files(env["store"])
+    rec = yaml.safe_load(f.read_text())
+    assert rec["dryrun"] and rec["platform"] == "mi325x" and rec["bkc"] == "25.06.08"
+    assert [s["recipe"] for s in rec["steps"]] == ["hbm_lvl1", "xgmi_lvl1"]
+    assert [o["verdict"] for o in rec["outcome"]] == ["PASS", "PASS"] and rec["versions"].get("ROCm") == "7.2.1"
+    assert "Recipe saved" in out["report"] and out["recipe_saved"] == str(f)
+    # second request: the planner is shown the recipe, adapts it, and the approver sees where it came from
+    m2 = FakeModel(plans=[Plan(tier="subsystem_lvl1", based_on=rec["id"], steps=[{"recipe": "hbm_lvl1", "reason": "r"}])])
+    g2 = build_graph(env["tools"], m2, m2, InMemorySaver(), poll_s=0.5, recipes=env["store"])
+    out2, seen = drive(g2, {"requirements": "HBM and XGMI check", "node": "sim"}, [{"action": "reject"}], thread="t2")
+    assert rec["id"] in m2.prompts[0] and "Previously approved plans" in m2.prompts[0]
+    assert f"Based on approved recipe `{rec['id']}`" in seen[0]["markdown"]
+
+
+def test_fail_verdict_still_saves_recipe_but_failed_execution_does_not(env, monkeypatch):
+    monkeypatch.setenv("SIM_SCENARIO", "fail")
+    m = FakeModel(plans=[plan("all_lvl1")])
+    g = build_graph(env["tools"], m, m, InMemorySaver(), poll_s=0.5, recipes=env["store"])
+    out, _ = drive(g, {"requirements": "smoke", "node": "sim"}, [{"action": "approve"}])
+    assert out["status"] == "FAILED" and len(recipe_files(env["store"])) == 1   # plan executed; the GPU failed
+    monkeypatch.setenv("SIM_GPU_BUSY", "1")
+    m = FakeModel(plans=[plan("all_lvl2", tier="standard")], replans=[Replan(action="stop", reason="busy")])
+    g = build_graph(env["tools"], m, m, InMemorySaver(), poll_s=0.5, recipes=env["store"])
+    drive(g, {"requirements": "standard", "node": "sim"}, [{"action": "approve"}], thread="t2")
+    assert len(recipe_files(env["store"])) == 1                                  # nothing ran: nothing saved
+
+
+def test_rejected_plan_not_saved_and_unknown_based_on_cleared(env):
+    m = FakeModel(plans=[Plan(tier="smoke", based_on="made-up-id", steps=[{"recipe": "all_lvl1", "reason": "r"}])])
+    g = build_graph(env["tools"], m, m, InMemorySaver(), poll_s=0.5, recipes=env["store"])
+    out, seen = drive(g, {"requirements": "x", "node": "sim"}, [{"action": "reject"}])
+    assert "New plan (no matching approved recipe)" in seen[0]["markdown"] and out["plan"]["based_on"] == ""
+    assert not recipe_files(env["store"])
+
+
+def test_dryrun_and_live_recipes_never_mix(tmp_path):
+    st = RecipeStore(tmp_path)
+    kw = dict(platform="mi325x", bkc="25.06.08", plan={"tier": "smoke", "steps": [{"recipe": "all_lvl1"}]},
+              results=[{"recipe": "all_lvl1", "run_id": "r1", "verdict": "PASS"}], versions={}, node="sim")
+    st.save(requirements="quick health check", dryrun=True, **kw)
+    assert st.find("quick health check", "mi325x", dryrun=True)
+    assert st.find("quick health check", "mi325x", dryrun=False) == []
+    assert st.find("quick health check", "mi350x", dryrun=True) == []
+
+
+class FakeIndex:
+    def __init__(self):
+        self.added = []
+
+    def add(self, text, agent_id, metadata):
+        self.added.append((text, agent_id, metadata))
+
+    def search(self, query, agent_id, platform, k):
+        return [{"path": md["path"], "score": 0.9} for _, a, md in self.added if a == agent_id][:k] + \
+               [{"path": "/etc/passwd", "score": 0.99}]
+
+
+def test_index_is_used_and_paths_outside_the_store_are_ignored(tmp_path):
+    idx = FakeIndex()
+    st = RecipeStore(tmp_path, index=idx)
+    rec = st.save(platform="mi325x", bkc="25.06.08", requirements="XGMI link check", dryrun=False, node="n1",
+                  plan={"tier": "subsystem_lvl1", "steps": [{"recipe": "xgmi_lvl1"}]},
+                  results=[{"recipe": "xgmi_lvl1", "run_id": "r", "verdict": "PASS"}], versions={})
+    (text, agent, md), = idx.added
+    assert agent == "test-planner" and md["type"] == "procedure" and "xgmi_lvl1" in text
+    found = st.find("anything", "mi325x", dryrun=False)
+    assert [r["id"] for r in found] == [rec["id"]]

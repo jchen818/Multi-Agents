@@ -1,0 +1,10 @@
+#!/bin/bash
+# Simulated rocm-smi for the GPU-idle check. SIM_GPU_BUSY=1 simulates vLLM holding GPUs 4-7.
+case "$1" in
+  --showmemuse) echo "============ Memory Usage (VRAM%) ============"
+    for i in $(seq 0 7); do v=0; [ "${SIM_GPU_BUSY:-0}" = 1 ] && [ $i -ge 4 ] && v=92
+      echo "GPU[$i]		: GPU Memory Allocated (VRAM%): $v"; done;;
+  --showpids) if [ "${SIM_GPU_BUSY:-0}" = 1 ]; then printf 'PID\tPROCESS NAME\tGPU(s)\tVRAM USED\n48211\tpython3\t4\t961167872000\t0\t0\n'
+    else echo "No KFD PIDs currently running"; fi;;
+  --version) echo "ROCM-SMI version: 4.0.0 (SIMULATED)";;
+esac

@@ -1,0 +1,5 @@
+EXEC: gpu_info-1-1                  [00:00:00/00:00:10][92mPASS[0m: gpu_info-1-1                  [00:00:01/00:00:10]
+EXEC: hbm_bw-1-1                    [00:00:00/00:01:05][92mPASS[0m: hbm_bw-1-1                    [00:00:49/00:01:05]
+[92mPASS[0m: hbm_s16_ds-1-1                  [00:01:12/00:01:20]
+Tests: 6 Total, 6 Executed, 0 Skipped | [92m6 Passed[0m, 0 Failed
+Program exiting with return code AGFHC_SUCCESS [0]

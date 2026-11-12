@@ -1,0 +1,21 @@
+#!/bin/bash
+# Simulated AGFHC 1.30.2 for dry-run mode. Output formats are from real runs (selfcheck_agfhc.py fixtures and
+# `agfhc --list` on mitacai). Touches no GPU. Scenario: SIM_SCENARIO=fail (default, 5 PASS / 1 FAIL) or pass.
+D="${SIM_DATA:?}"
+case "$1" in
+  --version) echo "agfhc version: 1.30.2 (SIMULATED - dry-run)";;
+  --list) cat "$D/list.txt";;
+  -r)
+    sc="${SIM_SCENARIO:-fail}"
+    ld="${FAKE_ROOTLOG:?}/agfhc_$(date +%Y%m%d-%H%M%S)"
+    mkdir -p "$ld/tests/hbm_s16_ds-1-1"
+    cp "$D/results_$sc.json" "$ld/results.json"
+    echo "GPU-05 pattern miscompare at 0x1f000 (simulated)" > "$ld/tests/hbm_s16_ds-1-1/stdout.log"
+    echo "agfhc version: 1.30.2 (SIMULATED) recipe: $2"
+    echo "Log Directory: $ld"
+    sed "s#__LOGDIR__#$ld#g" "$D/part1_$sc.log"
+    sleep "${SIM_SLEEP:-3}"
+    sed "s#__LOGDIR__#$ld#g" "$D/part2_$sc.log"
+    [ "$sc" = pass ] && exit 0 || exit 13;;
+  *) echo "simulated agfhc: unsupported args: $*" >&2; exit 2;;
+esac

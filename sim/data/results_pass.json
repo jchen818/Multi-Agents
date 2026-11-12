@@ -1,0 +1,61 @@
+{
+ "summary": {
+  "total_selected_tests": 6,
+  "total_executed_tests": 6,
+  "total_skipped": 0,
+  "total_passed": 6,
+  "total_failed": 0,
+  "status_code_text": "AGFHC_SUCCESS",
+  "status_code_numeric": 0
+ },
+ "results": [
+  {
+   "state": "passed",
+   "primary_status_name": "TEST_PASS",
+   "time_total": "00:00:00",
+   "test": "pcie_link_status",
+   "run": 1,
+   "iteration": 1
+  },
+  {
+   "state": "passed",
+   "primary_status_name": "TEST_PASS",
+   "time_total": "00:00:19",
+   "test": "pcie_bidi_peak",
+   "run": 1,
+   "iteration": 1
+  },
+  {
+   "state": "passed",
+   "primary_status_name": "TEST_PASS",
+   "time_total": "00:00:10",
+   "test": "xgmi_a2a",
+   "run": 1,
+   "iteration": 1
+  },
+  {
+   "state": "passed",
+   "primary_status_name": "TEST_PASS",
+   "time_total": "00:00:01",
+   "test": "gpu_info",
+   "run": 1,
+   "iteration": 1
+  },
+  {
+   "state": "passed",
+   "primary_status_name": "TEST_PASS",
+   "time_total": "00:00:49",
+   "test": "hbm_bw",
+   "run": 1,
+   "iteration": 1
+  },
+  {
+   "state": "passed",
+   "primary_status_name": "TEST_PASS",
+   "time_total": "00:01:12",
+   "test": "hbm_s16_ds",
+   "run": 1,
+   "iteration": 1
+  }
+ ]
+}

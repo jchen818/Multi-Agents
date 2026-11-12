@@ -6,6 +6,7 @@ SERVERS = {
     "searxng": {"transport": "stdio", "command": f"{TOOLS}/run_searxng_mcp.sh", "args": []},
     "redfish": {"transport": "stdio", "command": f"{TOOLS}/run_redfish_mcp.sh", "args": []},
     "labcli": {"transport": "stdio", "command": f"{TOOLS}/run_labcli_mcp.sh", "args": []},
+    "agfhc": {"transport": "stdio", "command": f"{TOOLS}/run_agfhc_mcp.sh", "args": []},   # Phase 2; not given to Lab Ops
 }
 ALLOWED = {
     "searxng": {"search_web", "search_news", "fetch_url"},
@@ -14,6 +15,8 @@ ALLOWED = {
                 "get_component_inventory", "get_firmware_inventory",
                 "get_boot_config", "get_log_entries"},
     "labcli": {"list_nodes", "run_readonly_cmd", "get_ipmi_sel", "get_ipmi_fru","get_ipmi_sensors"},
+    "agfhc": {"list_test_nodes", "preflight", "list_recipe_tests", "plan_run", "start_run",
+              "get_run_status", "analyze_run", "finalize_report"},
 }
 client = MultiServerMCPClient(SERVERS)
 

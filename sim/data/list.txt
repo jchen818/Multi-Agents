@@ -1,0 +1,85 @@
+agfhc version: 1.30.2
+package: mi300
+git version: c43fd1e
+Log Directory: /root/agfhc/logs/agfhc_20261112-100914
+The following tests are defined
+Name               Title                 Path
+athub              ATHUB                 /opt/amd/agfhc/tests/mi325x/athub.yml
+dma_bidi_peak      DMA BW BiDi Peak      /opt/amd/agfhc/tests/mi325x/dma_bidi_peak.yml
+dma_d2h_peak       DMA BW D2H Peak       /opt/amd/agfhc/tests/mi325x/dma_d2h_peak.yml
+dma_h2d_peak       DMA BW H2D Peak       /opt/amd/agfhc/tests/mi325x/dma_h2d_peak.yml
+gfx_bf16ri         GFX bf16 rand int     /opt/amd/agfhc/tests/mi325x/gfx_bf16ri.yml
+gfx_bf16tf         GFX bf16 trig float   /opt/amd/agfhc/tests/mi325x/gfx_bf16tf.yml
+gfx_dgemm          GFX dgemm             /opt/amd/agfhc/tests/mi325x/gfx_dgemm.yml
+gfx_fp16ri         GFX fp16 rand int     /opt/amd/agfhc/tests/mi325x/gfx_fp16ri.yml
+gfx_fp16tf         GFX fp16 trig float   /opt/amd/agfhc/tests/mi325x/gfx_fp16tf.yml
+gfx_fp8ri          GFX fp8 rand int      /opt/amd/agfhc/tests/mi325x/gfx_fp8ri.yml
+gfx_fp8tf          GFX fp8 trig float    /opt/amd/agfhc/tests/mi325x/gfx_fp8tf.yml
+gfx_maxpower       GFX Max Power         /opt/amd/agfhc/tests/mi325x/gfx_maxpower.yml
+gfx_sgemm          GFX sgemm             /opt/amd/agfhc/tests/mi325x/gfx_sgemm.yml
+hbm                HBM                   /opt/amd/agfhc/tests/mi325x/hbm.yml
+hbm_bw             HBM BW                /opt/amd/agfhc/tests/mi325x/hbm_bw.yml
+hbm_ds             HBM Dual Stream       /opt/amd/agfhc/tests/mi325x/hbm_ds.yml
+hbm_ds_ntd         HBM Dual Stream NTD   /opt/amd/agfhc/tests/mi325x/hbm_ds_ntd.yml
+hbm_remix2         HBM Remix2            /opt/amd/agfhc/tests/mi325x/hbm_remix2.yml
+hbm_s16            HBM S16               /opt/amd/agfhc/tests/mi325x/hbm_s16.yml
+hbm_s16_ds         HBM S16 Dual Stream   /opt/amd/agfhc/tests/mi325x/hbm_s16_ds.yml
+mall               MALL                  /opt/amd/agfhc/tests/mi325x/mall.yml
+minihpl            miniHPL               /opt/amd/agfhc/tests/mi325x/minihpl.yml
+pcie_bidi_peak     PCIe BW BiDi Peak     /opt/amd/agfhc/tests/mi325x/pcie_bidi_peak.yml
+pcie_link_status   PCIe Link Status      /opt/amd/agfhc/tests/mi325x/pcie_link_status.yml
+pcie_unidi_peak    PCIe BW UniDi Peak    /opt/amd/agfhc/tests/mi325x/pcie_unidi_peak.yml
+rochpl             rocHPL                /opt/amd/agfhc/tests/mi325x/rochpl.yml
+roctwitch          rocTwitch             /opt/amd/agfhc/tests/mi325x/roctwitch.yml
+sleep              Sleep                 /opt/amd/agfhc/tests/mi325x/sleep.yml
+sprites            SPRITES               /opt/amd/agfhc/tests/mi325x/sprites.yml
+xgmi_a2a           XGMI BW A2A           /opt/amd/agfhc/tests/mi325x/xgmi_a2a.yml
+
+The following test recipes are defined
+Name               Title                             Path
+acf_lvl1           A  ~5m ACF workload               /opt/amd/agfhc/recipes/mi325x/acf_lvl1.yml
+acf_lvl2           A  ~10m ACF workload              /opt/amd/agfhc/recipes/mi325x/acf_lvl2.yml
+acf_lvl3           A  ~30m ACF workload              /opt/amd/agfhc/recipes/mi325x/acf_lvl3.yml
+acf_lvl4           A  ~60m ACF workload              /opt/amd/agfhc/recipes/mi325x/acf_lvl4.yml
+all_burnin_12h     A ~12h check across system        /opt/amd/agfhc/recipes/mi325x/all_burnin_12h.yml
+all_burnin_24h     A ~24h check across system        /opt/amd/agfhc/recipes/mi325x/all_burnin_24h.yml
+all_burnin_4h      A ~4h check across system         /opt/amd/agfhc/recipes/mi325x/all_burnin_4h.yml
+all_lvl1           A  ~5m check across system        /opt/amd/agfhc/recipes/mi325x/all_lvl1.yml
+all_lvl2           A ~10m check across system        /opt/amd/agfhc/recipes/mi325x/all_lvl2.yml
+all_lvl3           A ~30m check across system        /opt/amd/agfhc/recipes/mi325x/all_lvl3.yml
+all_lvl4           A  ~1h check across system        /opt/amd/agfhc/recipes/mi325x/all_lvl4.yml
+all_lvl5           A  ~2h check across system        /opt/amd/agfhc/recipes/mi325x/all_lvl5.yml
+all_perf           Run all performance based tests   /opt/amd/agfhc/recipes/mi325x/all_perf.yml
+dma_lvl1           A  ~5m DMA workload               /opt/amd/agfhc/recipes/mi325x/dma_lvl1.yml
+dma_lvl2           A  ~10m DMA workload              /opt/amd/agfhc/recipes/mi325x/dma_lvl2.yml
+dma_lvl3           A  ~30m DMA workload              /opt/amd/agfhc/recipes/mi325x/dma_lvl3.yml
+dma_lvl4           A  ~1h DMA workload               /opt/amd/agfhc/recipes/mi325x/dma_lvl4.yml
+gfx_lvl1           A  ~5m GFX workload               /opt/amd/agfhc/recipes/mi325x/gfx_lvl1.yml
+gfx_lvl2           A ~10m GFX workload               /opt/amd/agfhc/recipes/mi325x/gfx_lvl2.yml
+gfx_lvl3           A ~30m GFX workload               /opt/amd/agfhc/recipes/mi325x/gfx_lvl3.yml
+gfx_lvl4           A  ~1h GFX workload               /opt/amd/agfhc/recipes/mi325x/gfx_lvl4.yml
+hbm_burnin_24h     A ~24h extended hbm test          /opt/amd/agfhc/recipes/mi325x/hbm_burnin_24h.yml
+hbm_burnin_8h      A ~8h extended hbm test           /opt/amd/agfhc/recipes/mi325x/hbm_burnin_8h.yml
+hbm_lvl1           A  ~5m HBM workload               /opt/amd/agfhc/recipes/mi325x/hbm_lvl1.yml
+hbm_lvl2           A ~10m HBM workload               /opt/amd/agfhc/recipes/mi325x/hbm_lvl2.yml
+hbm_lvl3           A ~30m HBM workload               /opt/amd/agfhc/recipes/mi325x/hbm_lvl3.yml
+hbm_lvl4           A  ~1h HBM workload               /opt/amd/agfhc/recipes/mi325x/hbm_lvl4.yml
+hbm_lvl5           A  ~2h HBM workload               /opt/amd/agfhc/recipes/mi325x/hbm_lvl5.yml
+hsio               Run all HSIO tests once           /opt/amd/agfhc/recipes/mi325x/hsio.yml
+pcie_lvl1          A  ~5m PCIe workload              /opt/amd/agfhc/recipes/mi325x/pcie_lvl1.yml
+pcie_lvl2          A ~10m PCIe workload              /opt/amd/agfhc/recipes/mi325x/pcie_lvl2.yml
+pcie_lvl3          A ~30m PCIe workload              /opt/amd/agfhc/recipes/mi325x/pcie_lvl3.yml
+pcie_lvl4          A  ~1h PCIe workload              /opt/amd/agfhc/recipes/mi325x/pcie_lvl4.yml
+rochpl_isolation   Run rocHPL on each GPU            /opt/amd/agfhc/recipes/mi325x/rochpl_isolation.yml
+single_pass        Run all tests once                /opt/amd/agfhc/recipes/mi325x/single_pass.yml
+thermal            Verify thermal solution           /opt/amd/agfhc/recipes/mi325x/thermal.yml
+xgmi_lvl1          A  ~5m xGMI workload              /opt/amd/agfhc/recipes/mi325x/xgmi_lvl1.yml
+xgmi_lvl2          A ~10m xGMI workload              /opt/amd/agfhc/recipes/mi325x/xgmi_lvl2.yml
+xgmi_lvl3          A ~30m xGMI workload              /opt/amd/agfhc/recipes/mi325x/xgmi_lvl3.yml
+xgmi_lvl4          A  ~1h xGMI workload              /opt/amd/agfhc/recipes/mi325x/xgmi_lvl4.yml
+
+Summary:
+  Tests: 0 Total, 0 Executed, 0 Skipped
+  Total Time: 00:00:03
+  Log directory: /root/agfhc/logs/agfhc_20261112-100914
+Program exiting with return code AGFHC_SUCCESS [0]

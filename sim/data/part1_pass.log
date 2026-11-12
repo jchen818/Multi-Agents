@@ -1,0 +1,10 @@
+Product: MI325X | GPUs: 8 | Mode: BM SPX NPS1 | Checks: dmesg+ ras+ perf+ cper+
+pcie_link_status   PCIe Link Status          1 iteration                   0:00:08
+pcie_bidi_peak     PCIe BW BiDi Peak         1 iteration                   0:00:50
+xgmi_a2a           XGMI BW A2A               1 iteration                   0:00:25
+gpu_info           GPU Info                  1 iteration                   0:00:10
+hbm_bw             HBM BW                    1 iteration                   0:01:05
+hbm_s16_ds         HBM S16 Dual Stream       1 iteration                   0:01:20
+EXEC: pcie_link_status-1-1          [00:00:00/00:00:08][92mPASS[0m: pcie_link_status-1-1          [00:00:00/00:00:08]
+EXEC: pcie_bidi_peak-1-1            [00:00:00/00:00:50][92mPASS[0m: pcie_bidi_peak-1-1            [00:00:19/00:00:50]
+EXEC: xgmi_a2a-1-1                  [00:00:00/00:00:25][92mPASS[0m: xgmi_a2a-1-1                  [00:00:10/00:00:25]

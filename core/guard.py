@@ -5,7 +5,7 @@ from urllib.parse import urlparse
 
 MAX_OUTPUT_CHARS = int(os.getenv("MAX_TOOL_OUTPUT_CHARS", "8000"))
 DEFAULT_TIMEOUT = 60
-TIMEOUTS = {"redfish": 180, "searxng": 30, "labcli": 90}
+TIMEOUTS = {"redfish": 180, "searxng": 30, "labcli": 90, "agfhc": 240}
 KILL_FILE = Path(os.getenv("AGENTS_KILL_FILE", "/home/mitac/Multi-Agents/state/KILL"))
 
 # Configured names per argument. Filled by the agent at start (set_known); empty = no check.

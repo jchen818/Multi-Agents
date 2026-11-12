@@ -1,0 +1,10 @@
+#!/bin/bash
+# Simulated amd-smi (8 x MI325X, versions as on mitacai). Dry-run only.
+N=8
+case "$1 $2" in
+  "version "*) echo "AMDSMI Tool: 26.2.2+e1a6bc5663 | AMDSMI Library version: 26.2.2 | ROCm version: 7.2.1 | amdgpu version: 6.16.13 (SIMULATED)";;
+  "list "*) for g in $(seq 0 $((N-1))); do echo "GPU: $g"; echo "    BDF: 0000:0$g:00.0"; done;;
+  "static --asic") for g in $(seq 0 $((N-1))); do echo "GPU: $g"; echo "    ASIC:"; echo "        MARKET_NAME: AMD Instinct MI325X"; done;;
+  "static --vbios") for g in $(seq 0 $((N-1))); do echo "GPU: $g"; echo "    VBIOS:"; echo "        PART_NUMBER: 113-M3250100-100"; echo "        VERSION: 022.040.003.043.000001"; done;;
+  "firmware "*) for g in $(seq 0 $((N-1))); do echo "GPU: $g"; echo "        FW_ID: PSP_SOSDRV"; echo "        FW_VERSION: 00.36.00.5F"; done;;
+esac

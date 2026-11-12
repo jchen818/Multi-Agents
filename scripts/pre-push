@@ -3,7 +3,7 @@
 #  1. unit tests (always, seconds)
 #  2. smoke eval (always, seconds)
 #  3. Lab Ops live eval (~4 min) only if agents/, core/, tools/ or evals/lab_ops/ changed; needs >= 27/30
-#  4. planner eval (~8 min) only if planner, recipes, agfhc server, templates, sim or evals/planner/ changed; needs >= 20/22
+#  4. planner eval (~2 min) only if planner, recipes, agfhc server, templates, sim or evals/planner/ changed; needs >= 20/22
 set -uo pipefail
 root=$(git rev-parse --show-toplevel); cd "$root"
 source .venv/bin/activate
@@ -46,7 +46,7 @@ else
 fi
 
 if echo "$changed" | grep -qE '^(agents/test_planner/|core/(recipes|mcp|guard|models)\.py|tools/agfhc/|config/plan_templates/|sim/|evals/planner/)'; then
-  echo "pre-push: planner files changed - running planner eval (~8 min)"
+  echo "pre-push: planner files changed - running planner eval (~2 min)"
   run_eval planner "Planner" 20 requirements
 else
   echo "pre-push: no planner files changed - planner eval skipped"

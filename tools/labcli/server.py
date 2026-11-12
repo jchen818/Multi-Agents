@@ -57,13 +57,13 @@ def _ethtool(args):
     return "ethtool: only <iface> or -i/-S/-m/-k <iface>"
 
 RULES = {
-    **{p: None for p in ("uptime", "uname", "hostname", "free", "df", "lsblk", "lsmod", "lspci", "sensors", "nproc")},
+    **{p: None for p in ("uptime", "uname", "hostname", "free", "df", "lsblk", "lsmod", "lspci", "sensors", "nproc", "modinfo")},
     "dmesg": _deny(short="cCDEnwW", long=("--clear", "--read-clear", "--console", "--follow")),
     "journalctl": _deny(short="f", long=("--follow", "--vacuum", "--rotate", "--flush", "--sync",
                                           "--relinquish", "--smart-relinquish", "--setup-keys", "--update-catalog")),
     "rocm-smi": _deny(short="r", long=("--set", "--reset", "--load", "--save", "--gpureset", "--ras", "--autorespond")),
     "amd-smi": _amd_smi,
-    "cat": _paths("/proc/", "/sys/", "/etc/os-release"),
+    "cat": _paths("/proc/", "/sys/", "/etc/os-release", "/opt/rocm/.info/"),
     "ls": _paths("/proc/", "/sys/", "/dev/", "/opt/rocm", "/var/log/"),
     "ip": _ip,
     "ethtool": _ethtool,

@@ -93,12 +93,18 @@ def plan_markdown(state: State) -> str:
 
 # ------------------------------------------------------------------ helpers
 
+WRAPPER = re.compile(r'\A\s*<tool_output tool="[^"]*" seconds="[^"]*">\n?(.*?)\n?</tool_output>\s*\Z', re.S)
+
+
 def _text(x) -> str:
+    """Tool result as plain text, without the <tool_output> wrapper core/guard.py adds."""
     if isinstance(x, tuple):
         x = x[0]
     if isinstance(x, list):
-        return "\n".join(b.get("text", "") if isinstance(b, dict) else str(b) for b in x)
-    return str(x)
+        x = "\n".join(b.get("text", "") if isinstance(b, dict) else str(b) for b in x)
+    x = str(x)
+    m = WRAPPER.match(x)
+    return m.group(1) if m else x.strip()
 
 
 def _grab(pattern: str, text: str) -> Optional[str]:

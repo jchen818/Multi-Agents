@@ -7,16 +7,26 @@ from pathlib import Path
 
 import pytest
 from langchain_core.messages import AIMessage
+from langchain_core.tools import StructuredTool
+from pydantic import create_model
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.types import Command
 
 REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO))
 sys.path.insert(0, str(REPO / "tools" / "agfhc"))
+from core.guard import guard_tool  # noqa: E402
 from agents.test_planner.graph import build_graph, validate_plan, template, Plan, Replan  # noqa: E402
 
 TOOLS = ["list_test_nodes", "preflight", "list_recipe_tests", "plan_run", "start_run",
          "get_run_status", "analyze_run", "finalize_report"]
+
+
+def _schema(fn):
+    import inspect
+    fields = {p.name: (str, p.default if p.default is not inspect._empty else ...)
+              for p in inspect.signature(fn).parameters.values()}
+    return create_model(f"{fn.__name__}_args", **fields)
 
 
 class FakeModel:
@@ -51,12 +61,15 @@ def env(tmp_path, monkeypatch):
     spec = importlib.util.spec_from_file_location("agfhc_server_planner", REPO / "tools/agfhc/server.py")
     srv = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(srv)
-    def wrap(fn):
-        async def call(**kw):
+    # Same path as production: each server function becomes a LangChain tool wrapped by core/guard.py
+    def wrap(name, fn):
+        async def coro(**kw):
             r = fn(**kw)
             return await r if asyncio.iscoroutine(r) else r
-        return call
-    return {"tools": {n: wrap(getattr(srv, n)) for n in TOOLS}, "tmp": tmp_path}
+        tool = guard_tool(StructuredTool.from_function(coroutine=coro, name=name, description=name,
+                                                       args_schema=_schema(fn)), "agfhc")
+        return lambda **kw: tool.ainvoke(kw)
+    return {"tools": {n: wrap(n, getattr(srv, n)) for n in TOOLS}, "tmp": tmp_path}
 
 
 def plan(*recipes, tier="smoke"):

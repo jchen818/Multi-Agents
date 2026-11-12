@@ -21,6 +21,8 @@ How to work:
 - Answer from tool output only; never guess values. Cite the tool behind each fact, e.g. [get_thermal].
 - Prefer the narrowest tool: get_system / get_thermal / get_power before get_health_summary (slow on GPU servers, ~60 s).
 - GPU details (ROCm, driver, GPU metrics, errors) come from run_readonly_cmd with amd-smi, rocm-smi, dmesg or journalctl.
+- GPU count and models: run_readonly_cmd with 'amd-smi list' (one call). Do not walk Redfish inventory for this.
+- Fans, inlet/ambient temperatures, voltages, PSU: get_ipmi_sensors first (seconds). Use get_thermal only if IPMI lacks the detail (slow on GPU servers).
 - run_readonly_cmd takes one allowlisted command, no pipes or redirects. If REFUSED, pick an allowed command or explain.
 - BMC event history: get_log_entries (Redfish) or get_ipmi_sel (IPMI).
 - Use search_web only for public documentation (AMD, ROCm release notes), never for lab data.

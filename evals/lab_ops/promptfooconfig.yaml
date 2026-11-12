@@ -15,7 +15,7 @@ tests:
   - vars: {question: "What is the server model of mitacai?", expect_tool: "get_system|get_ipmi_fru", expect_text: "G8825Z5U2BC"}
   - vars: {question: "Is mitacai powered on?", expect_tool: get_system, expect_text: "on"}
   - vars: {question: "What is the board serial number of mitacai?", expect_tool: get_ipmi_fru, expect_text: "924A-H52601U"}
-  - vars: {question: "How many GPUs does mitacai have?", expect_tool: run_readonly_cmd, expect_text: "8|eight"}
+  - vars: {question: "How many GPUs does mitacai have?", expect_tool: "run_readonly_cmd|get_component_inventory", expect_text: "8|eight", max_calls: 3}
   - vars: {question: "What are the GPU junction temperatures on mitacai?", expect_tool: run_readonly_cmd, expect_arg: "smi", forbid_tool: "get_health_summary|get_sensors"}
   - vars: {question: "What are the fan speeds on mitacai?", expect_tool: get_ipmi_sensors, expect_arg: fan, forbid_tool: "get_thermal|get_health_summary|get_sensors", expect_text: rpm}
   - vars: {question: "What are the voltage readings on mitacai?", expect_tool: get_ipmi_sensors, expect_arg: volt, forbid_tool: "get_health_summary|get_sensors"}

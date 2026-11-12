@@ -10,7 +10,7 @@ SERVERS = {
 ALLOWED = {
     "searxng": {"search_web", "search_news", "fetch_url"},
     "redfish": {"list_bmcs", "list_systems", "get_system", "list_chassis",
-                "get_health_summary", "get_thermal", "get_power", "get_sensors",
+                "get_health_summary", "get_thermal", "get_power",   # get_sensors removed: 140+ requests, hits 180 s timeout
                 "get_component_inventory", "get_firmware_inventory",
                 "get_boot_config", "get_log_entries"},
     "labcli": {"list_nodes", "run_readonly_cmd", "get_ipmi_sel", "get_ipmi_fru","get_ipmi_sensors"},

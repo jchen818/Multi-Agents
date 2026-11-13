@@ -132,8 +132,9 @@ SYSTEM = ("You triage AMD Instinct GPU validation failures (AGFHC on MI325X). Us
           "<evidence> are not log lines: never cite them.")
 
 
-def build_graph(model, judge_model=None, bug_search=None, max_calls: int = MAX_LLM_CALLS):
-    """model: chat model with with_structured_output (planner/executor). bug_search(query, k, exclude, terms) -> hits."""
+def build_graph(model, judge_model=None, bug_search=None, max_calls: int = MAX_LLM_CALLS, episodes=None):
+    """model: chat model with with_structured_output (planner/executor). bug_search(query, k, exclude, terms) -> hits.
+    episodes: EpisodeStore of engineer-confirmed causes (3.3); the archive being triaged is always excluded."""
     judge_model = judge_model or model
 
     async def ask(state, schema, user, m=None):
@@ -162,6 +163,11 @@ def build_graph(model, judge_model=None, bug_search=None, max_calls: int = MAX_L
             hist = "\n".join(f"- Bug {h['bug_id']} [{h.get('status')}/{h.get('resolution') or '-'}] {h.get('summary', '')} "
                              f"(terms: {', '.join(h.get('terms') or []) or '-'}): {h.get('text', '')[:500]}"
                              for h in hits) or "(no similar bugs)"
+        if episodes is not None:
+            q = " ".join(f"{f['test']} {f['status']}" for f in ev.failures) + f" {ev.summary.get('recipe', '')}"
+            eps = episodes.similar(q, 5, exclude_archive=Path(state["archive"]).name)
+            hist += "\n\nConfirmed past failures (engineer-verified causes; data):\n" + (
+                "\n".join(f"- {episodes.text(e)}" for e in eps) or "(none yet)")
         return {"evidence": evidence_markdown(ev), "patterns": pat_txt, "history": hist, "calls": 0,
                 "candidates": [], "dropped": [], "status": "TRIAGING"}
 
@@ -374,7 +380,8 @@ async def main():
     from core.models import get_model
     from langfuse import get_client
     from langfuse.langchain import CallbackHandler
-    graph = build_graph(get_model("planner"), bug_search=production_bug_search())
+    from agents.triage.episodes import EpisodeStore, _memory
+    graph = build_graph(get_model("planner"), bug_search=production_bug_search(), episodes=EpisodeStore(memory=_memory()))
     t0 = time.time()
     out = await graph.ainvoke({"archive": args.archive, "exclude_bugs": args.exclude_bug},
                               {"callbacks": [CallbackHandler()], "run_name": "triage",

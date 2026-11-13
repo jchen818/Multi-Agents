@@ -10,6 +10,7 @@ so comments are the main signal. Embeddings: qwen3-embed via the OpenAI-compatib
 import argparse
 import json
 import os
+import re
 import sys
 import uuid
 from pathlib import Path
@@ -125,6 +126,46 @@ def search(client, embed, query: str, k: int = 5, exclude_bugs=(), product: str 
     return list(best.values())[:k]
 
 
+SPECIFIC = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.\-]*[A-Za-z0-9]")
+
+
+def specific_terms(text: str, limit: int = 12) -> list:
+    """Test/recipe names, status codes, part numbers: tokens with a digit, underscore, inner capital or hyphen
+    (the same idea as the Bugzilla Agent's _is_specific)."""
+    seen, out = set(), []
+    for t in SPECIFIC.findall(text or ""):
+        low = t.lower()
+        if low in seen or len(low) < 4:
+            continue
+        if any(c.isdigit() for c in t) or "_" in t or "-" in t or any(c.isupper() for c in t[1:]):
+            seen.add(low)
+            out.append(low)
+    return out[:limit]
+
+
+def hybrid_search(client, embed, query: str, k: int = 5, exclude_bugs=(), bugs_file: Path = BUGS / "bugs.jsonl",
+                  collection: str = COLLECTION, extra_terms=()) -> list:
+    """Semantic hits re-ranked by exact specific terms (test names like hbm_s16_ds, codes like TEST_HBM_STRESS_FAIL).
+    Semantic scores alone sit in a narrow band (0.59-0.74 in the first build), so a bug that merely shares the word
+    'failed' could outrank the one that names the same test; exact technical terms decide the order instead."""
+    terms = list(dict.fromkeys(specific_terms(query) + [t.lower() for t in extra_terms if len(t) >= 4]))
+    texts = {}
+    if bugs_file.exists():
+        for line in open(bugs_file):
+            b = json.loads(line)
+            texts[b["id"]] = (b.get("summary", "") + " " + " ".join(c["text"] for c in b.get("comments") or [])).lower()
+    sem = {h["bug_id"]: h for h in search(client, embed, query, k=max(k * 4, 20), exclude_bugs=exclude_bugs,
+                                          collection=collection)}
+    for bid, text in texts.items():          # bugs that name a term but were not in the semantic top
+        if bid not in sem and bid not in exclude_bugs and any(t in text for t in terms):
+            sem[bid] = {"bug_id": bid, "score": 0.0, "summary": text[:80], "status": "", "resolution": "", "text": ""}
+    for h in sem.values():
+        hit = [t for t in terms if t in texts.get(h["bug_id"], "")]
+        h["terms"] = hit
+        h["rank"] = round(h["score"] + 0.15 * min(len(hit), 4), 3)
+    return sorted(sem.values(), key=lambda h: -h["rank"])[:k]
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("cmd", choices=["build", "search"])
@@ -134,8 +175,9 @@ def main():
     if args.cmd == "build":
         build(client, embed)
     else:
-        for h in search(client, embed, " ".join(args.query)):
-            print(f"#{h['bug_id']} {h['score']:.3f} [{h['status']}/{h['resolution'] or '-'}] {h['summary'][:70]}")
+        for h in hybrid_search(client, embed, " ".join(args.query)):
+            print(f"#{h['bug_id']} {h['rank']:.3f} (semantic {h['score']:.3f}, terms {', '.join(h['terms']) or '-'}) "
+                  f"[{h['status']}/{h['resolution'] or '-'}] {h['summary'][:70]}")
             print("    " + h["text"].replace("\n", " ")[:240])
 
 

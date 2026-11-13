@@ -78,3 +78,14 @@ def test_refuses_non_agents_collection(tmp_path):
     f.write_text(json.dumps(BUGS[2]))
     with pytest.raises(ValueError):
         build(qdrant_client.QdrantClient(":memory:"), fake_embed, f, collection="open-webui_files", log=lambda *_: None)
+
+
+def test_hybrid_ranks_exact_terms_first(store, tmp_path):
+    from tools.triage.bug_index import hybrid_search, specific_terms
+    client, _ = store
+    f = tmp_path / "bugs.jsonl"
+    assert specific_terms("rochpl device memory allocation failed on GPU-05, TEST_HBM_STRESS_FAIL") == \
+        ["gpu-05", "test_hbm_stress_fail"]
+    hits = hybrid_search(client, fake_embed, "hbm_ds_ntd failed", k=3, bugs_file=f)
+    assert hits[0]["bug_id"] == 22 and "hbm_ds_ntd" in hits[0]["terms"]
+    assert 22 not in [h["bug_id"] for h in hybrid_search(client, fake_embed, "hbm_ds_ntd", exclude_bugs=[22], bugs_file=f)]

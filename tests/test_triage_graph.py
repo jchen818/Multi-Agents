@@ -175,3 +175,23 @@ def test_prompts_ask_for_node_state_and_mark_old_lines():
     assert txt.splitlines()[0].startswith("[logs/dmesg_full.log:1983] (LOGGED BEFORE THIS RUN STARTED)")
     assert "BEFORE" not in txt.splitlines()[1]
     assert line_epoch("2026-10-12T15:54:09-07:00") == line_epoch("2026-10-12T22:54:09Z")
+
+
+def test_marker_in_citation_is_stripped_and_open_checks_listed(archive):
+    class F(Fake):
+        def answer(self, schema, u):
+            if schema is Score and "reads before it writes" in u:
+                return Score(score=0.6, support=[{"text": f"[logs/x/console.log:21] (LOGGED BEFORE THIS RUN STARTED) {CONSOLE}"}],
+                             reasoning="r")
+            return super().answer(schema, u)
+    out = run(build_graph(F()), archive)
+    assert any(c["hyp"]["category"] == "test tool/config defect" for c in out["ranked"])
+    assert "### Open checks" in out["report"] and "[XGMI link] XGMI link down during the run -> check:" in out["report"]
+
+
+def test_duplicates_only_within_a_category_and_after_the_judge():
+    from agents.triage.graph import _same
+    a = {"hyp": {"category": "hardware", "cause": "HBM stack fault on GPU-05"}, "support_v": [{"where": "c:1"}]}
+    b = {"hyp": {"category": "firmware/BKC", "cause": "VBIOS HBM timing"}, "support_v": [{"where": "c:1"}]}
+    c = {"hyp": {"category": "hardware", "cause": "HBM stack fault on GPU 05"}, "support_v": [{"where": "x:9"}]}
+    assert not _same(a, b) and _same(a, c)

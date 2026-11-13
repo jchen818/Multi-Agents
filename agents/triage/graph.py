@@ -97,9 +97,20 @@ def _fmt_hits(hits, ev=None) -> str:
                      for n, i, l in hits) or "(no matches)"
 
 
+MARKER = re.compile(r"^\s*(\[[^\]]+:\d+\]\s*)?(\(LOGGED BEFORE THIS RUN STARTED\)\s*)?")
+
+
+def _clean_cites(cs: list) -> list:
+    """Drop what we added to lines we showed the model: a leading [file:line] and the before-run marker."""
+    return [dict(c, text=MARKER.sub("", c.get("text", ""))) for c in cs]
+
+
 def _same(a: dict, b: dict) -> bool:
-    """Two candidates are duplicates if their causes read alike or they rest on the same log lines."""
+    """Duplicates: same category, and causes that read alike or rest on the same log lines.
+    Different categories are different explanations even when they cite the same FAIL line."""
     import difflib
+    if a["hyp"]["category"] != b["hyp"]["category"]:
+        return False
     if difflib.SequenceMatcher(None, a["hyp"]["cause"].lower(), b["hyp"]["cause"].lower()).ratio() >= 0.75:
         return True
     wa = {x["where"] for x in a.get("support_v") or []}
@@ -212,8 +223,8 @@ def build_graph(model, judge_model=None, bug_search=None, max_calls: int = MAX_L
         summary_lines = {_norm(l) for l in (state.get("evidence") or "").splitlines() if l.strip()}
         kept, dropped = [], list(state.get("dropped") or [])
         for c in state["candidates"]:
-            sup = verify_citations(ev, c.get("support") or [])
-            agn = verify_citations(ev, c.get("against") or [])
+            sup = verify_citations(ev, _clean_cites(c.get("support") or []))
+            agn = verify_citations(ev, _clean_cites(c.get("against") or []))
             # A quote of our own evidence summary (a heading such as "New kernel messages during the run: none") is
             # not a log line, but not an invention either: remove that citation and keep judging the candidate.
             from_summary = [x for x in sup + agn if not x["ok"] and any(x["text"] in s for s in summary_lines)]
@@ -229,13 +240,9 @@ def build_graph(model, judge_model=None, bug_search=None, max_calls: int = MAX_L
                 continue
             c["support_v"], c["against_v"] = sup, agn
             c["before_run"] = [x["where"] for x in sup if before_run(ev, x["text"])]
-            dup = next((k for k in kept if _same(k, c)), None)
-            if dup:
-                dropped.append(dict(c, why=f"duplicate of: {dup['hyp']['cause'][:80]}"))
-                continue
             kept.append(c)
         judged = []
-        for c in kept[:BEAM + 1]:
+        for c in kept[:BEAM + 2]:
             if state["calls"] >= max_calls - 2:
                 judged.append(dict(c, judge="not judged (budget)"))
                 continue
@@ -248,7 +255,14 @@ def build_graph(model, judge_model=None, bug_search=None, max_calls: int = MAX_L
                 judged.append(dict(c, judge=j.why))
             else:
                 dropped.append(dict(c, why=f"judge: {j.why}"))
-        return {"ranked": judged, "dropped": dropped, "calls": state["calls"]}
+        ranked = []
+        for c in judged:                    # duplicates collapse only among candidates that survived the judge
+            dup = next((k for k in ranked if _same(k, c)), None)
+            if dup:
+                dropped.append(dict(c, why=f"duplicate of: {dup['hyp']['cause'][:80]}"))
+            else:
+                ranked.append(c)
+        return {"ranked": ranked, "dropped": dropped, "calls": state["calls"]}
 
     async def report(state: State):
         ev = ev_of(state)
@@ -274,6 +288,18 @@ def build_graph(model, judge_model=None, bug_search=None, max_calls: int = MAX_L
             lines.append(f"- why: {c.get('reasoning', '')}")
             lines.append(f"- confirm by: {c['hyp']['confirm_if']}")
             lines.append("")
+        unchecked = [c for c in state["dropped"]
+                     if c["why"] == "no supporting log line" or c["why"].startswith("judge:")]
+        seen_cat = set()
+        open_checks = []
+        for c in unchecked:                 # one per category, so the list stays short
+            if c["hyp"]["category"] not in seen_cat and c["hyp"]["category"] not in {r["hyp"]["category"] for r in state["ranked"]}:
+                seen_cat.add(c["hyp"]["category"])
+                open_checks.append(c)
+        if open_checks:
+            lines.append("### Open checks (not supported by these logs; check outside the archive)")
+            lines += [f"- [{c['hyp']['category']}] {c['hyp']['cause']} -> check: {c['hyp']['confirm_if']}" for c in open_checks]
+            lines.append("")
         if state["dropped"]:
             lines.append("### Dropped candidates")
             lines += [f"- [{c['hyp']['category']}] {c['hyp']['cause']}: {c['why']}" for c in state["dropped"]]
@@ -282,8 +308,9 @@ def build_graph(model, judge_model=None, bug_search=None, max_calls: int = MAX_L
         if state["ranked"] and state["calls"] < max_calls:
             d = await ask(state, BugDraft, "Write a bug draft for an engineer to review and file. Use only this triage "
                                            "report. Include: the command that ran (from 'Command:'), the archive, "
-                                           "versions, the exact evidence lines, and the ranked hypotheses clearly "
-                                           "labeled as hypotheses, plus next steps to confirm them.\n\n" + text)
+                                           "versions, the exact evidence lines (only lines with a [file:line]), the "
+                                           "ranked hypotheses clearly labeled as hypotheses, and the open checks as "
+                                           "next steps.\n\n" + text)
             draft = d.model_dump() if d else {}
             if draft and state["calls"] < max_calls:
                 cr = await ask(state, Critique, "Check this bug draft: it has the command that ran, the environment "

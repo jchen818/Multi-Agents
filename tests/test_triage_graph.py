@@ -195,3 +195,18 @@ def test_duplicates_only_within_a_category_and_after_the_judge():
     b = {"hyp": {"category": "firmware/BKC", "cause": "VBIOS HBM timing"}, "support_v": [{"where": "c:1"}]}
     c = {"hyp": {"category": "hardware", "cause": "HBM stack fault on GPU 05"}, "support_v": [{"where": "x:9"}]}
     assert not _same(a, b) and _same(a, c)
+
+
+def test_draft_is_revised_when_critique_finds_problems_and_carries_the_command(archive):
+    class F(Fake):
+        def answer(self, schema, u):
+            if schema is Critique:
+                return Critique(ok=False, problems=["next steps say GPU 1 but evidence says GPU-05"])
+            if schema is BugDraft and u.startswith("Revise this bug draft"):
+                assert "GPU 1 but evidence says GPU-05" in u
+                return BugDraft(summary="hbm_s16_ds FAIL on GPU-05", description="Fixed: GPU-05 only. " + REAL)
+            return super().answer(schema, u)
+    out = run(build_graph(F()), archive)
+    d = out["draft"]
+    assert d["description"].startswith("Command: `") and "Fixed: GPU-05 only." in d["description"]
+    assert d["revised_for"] == ["next steps say GPU 1 but evidence says GPU-05"]

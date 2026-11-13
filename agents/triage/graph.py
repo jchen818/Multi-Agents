@@ -319,6 +319,18 @@ def build_graph(model, judge_model=None, bug_search=None, max_calls: int = MAX_L
                                                 "as fact."
                                                 f"\n\n{json.dumps(draft)}\n\nTriage report it must agree with:\n{text}")
                 draft["critique"] = cr.model_dump() if cr else {"ok": False, "problems": ["critique gave no structured answer"]}
+                if cr and not cr.ok and cr.problems and state["calls"] < max_calls:
+                    fixed = await ask(state, BugDraft, "Revise this bug draft to fix every problem listed, changing "
+                                                       "nothing else. Use only facts from the triage report.\n\nProblems:\n"
+                                                       + "\n".join(f"- {p}" for p in cr.problems)
+                                                       + f"\n\nDraft:\n{json.dumps({k: draft[k] for k in ('summary', 'description')})}"
+                                                       f"\n\nTriage report:\n{text}")
+                    if fixed:
+                        draft.update(fixed.model_dump(), revised_for=cr.problems)
+        if draft:     # the facts a reviewer needs first, set by code rather than left to the model
+            head = f"Command: `{s.get('cmd')}`\nArchive: {Path(state['archive']).name}\nRun: {s.get('run_id')} on {s.get('host')}\n\n"
+            if s.get("cmd") and s["cmd"] not in draft.get("description", ""):
+                draft["description"] = head + draft.get("description", "")
         return {"report": text, "draft": draft, "status": "DONE", "calls": state["calls"]}
 
     g = StateGraph(State)
@@ -371,7 +383,9 @@ async def main():
     print(out["report"])
     if out.get("draft"):
         print(f"\n--- bug draft (not filed) ---\n{out['draft'].get('summary')}\n\n{out['draft'].get('description')}")
-        if not (out["draft"].get("critique") or {}).get("ok", True):
+        if out["draft"].get("revised_for"):
+            print("\nrevised once for: " + "; ".join(out["draft"]["revised_for"]))
+        elif not (out["draft"].get("critique") or {}).get("ok", True):
             print("\ncritique: " + "; ".join(out["draft"]["critique"]["problems"]))
     print(f"\n{out['calls']} LLM calls, {time.time() - t0:.0f}s. Saved to {d}/triage.md and triage.json")
     get_client().flush()

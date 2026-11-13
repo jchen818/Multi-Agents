@@ -1,0 +1,56 @@
+#!/usr/bin/env bash
+# Full gate, run BEFORE pushing:  scripts/gate   (then git push)
+#  1. unit tests            2. smoke eval
+#  3. Lab Ops live eval (~4 min) if agents/, core/, tools/ or evals/lab_ops/ changed; needs >= 27/30
+#  4. planner eval (~2 min) if planner, recipes, agfhc server, templates, sim or evals/planner/ changed; needs >= 20/22
+# On success it stamps the commit (state/gate/<sha>); scripts/pre-push only checks the stamp, because git holds the
+# GitHub connection open while a hook runs and GitHub drops it after a few idle minutes.
+source "$(dirname "$0")/gate-common.sh"
+source .venv/bin/activate
+set -a; source agents.env; set +a
+export PROMPTFOO_DISABLE_TELEMETRY=1 PROMPTFOO_DISABLE_UPDATE=1
+fail() { echo "gate: $1 - not stamped"; exit 1; }
+git diff --quiet && git diff --cached --quiet || fail "uncommitted changes (the gate tests the commit; commit or stash first)"
+
+python -m pytest -q tests/ >/tmp/prepush-pytest.log 2>&1 || fail "unit tests failed (see /tmp/prepush-pytest.log)"
+echo "gate: unit tests ok"
+
+(cd evals/smoke && npx -y promptfoo@latest eval -c promptfooconfig.yaml --no-cache >/tmp/prepush-smoke.log 2>&1) \
+  || fail "smoke eval failed (see /tmp/prepush-smoke.log)"
+echo "gate: smoke eval ok"
+
+changed=$(changed_files)
+
+# run_eval <dir> <label> <min passes> <var shown on failure>
+run_eval() {
+  (cd "evals/$1" && npx -y promptfoo@latest eval -c promptfooconfig.yaml --no-cache -o "/tmp/prepush-$1.json" \
+     >"/tmp/prepush-$1.log" 2>&1)
+  python - "$1" "$2" "$3" "$4" <<'PY' || fail "$2 eval below $3 (see /tmp/prepush-$1.json)"
+import json, sys
+name, label, need, var = sys.argv[1], sys.argv[2], int(sys.argv[3]), sys.argv[4]
+rs = json.load(open(f"/tmp/prepush-{name}.json"))["results"]["results"]
+ok = sum(r["success"] for r in rs)
+print(f"gate: {label} eval {ok}/{len(rs)}")
+for r in rs:
+    if not r["success"]:
+        print("  FAIL:", str(r["vars"].get(var, ""))[:70], "->", (r.get("gradingResult") or {}).get("reason"))
+sys.exit(0 if ok >= need else 1)
+PY
+}
+
+if echo "$changed" | grep -qE "$AGENT_RE"; then
+  echo "gate: agent files changed - running Lab Ops eval (~4 min)"
+  run_eval lab_ops "Lab Ops" 27 question
+else
+  echo "gate: no agent files changed - Lab Ops eval skipped"
+fi
+
+if echo "$changed" | grep -qE "$PLANNER_RE"; then
+  echo "gate: planner files changed - running planner eval (~2 min)"
+  run_eval planner "Planner" 20 requirements
+else
+  echo "gate: no planner files changed - planner eval skipped"
+fi
+
+mkdir -p "$STAMPS" && git rev-parse HEAD > "$STAMPS/$(git rev-parse HEAD)"
+echo "gate: passed - stamped $(git rev-parse --short HEAD); you can git push now"

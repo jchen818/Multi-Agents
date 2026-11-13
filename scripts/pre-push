@@ -1,53 +1,22 @@
 #!/usr/bin/env bash
-# Pre-push gate. Install once:  ln -sf ../../scripts/pre-push .git/hooks/pre-push
-#  1. unit tests (always, seconds)
-#  2. smoke eval (always, seconds)
-#  3. Lab Ops live eval (~4 min) only if agents/, core/, tools/ or evals/lab_ops/ changed; needs >= 27/30
-#  4. planner eval (~2 min) only if planner, recipes, agfhc server, templates, sim or evals/planner/ changed; needs >= 20/22
-set -uo pipefail
-root=$(git rev-parse --show-toplevel); cd "$root"
-source .venv/bin/activate
-set -a; source agents.env; set +a
-export PROMPTFOO_DISABLE_TELEMETRY=1 PROMPTFOO_DISABLE_UPDATE=1
-fail() { echo "pre-push: $1 - push blocked"; exit 1; }
-
-python -m pytest -q tests/ >/tmp/prepush-pytest.log 2>&1 || fail "unit tests failed (see /tmp/prepush-pytest.log)"
-echo "pre-push: unit tests ok"
-
-(cd evals/smoke && npx -y promptfoo@latest eval -c promptfooconfig.yaml --no-cache >/tmp/prepush-smoke.log 2>&1) \
-  || fail "smoke eval failed (see /tmp/prepush-smoke.log)"
-echo "pre-push: smoke eval ok"
-
-# Files changed in the commits being pushed (compare with upstream if it exists, else last commit)
-changed=$(git diff --name-only '@{u}..HEAD' 2>/dev/null || git diff --name-only HEAD~1..HEAD)
-
-# run_eval <dir> <label> <min passes> <var shown on failure>
-run_eval() {
-  (cd "evals/$1" && npx -y promptfoo@latest eval -c promptfooconfig.yaml --no-cache -o "/tmp/prepush-$1.json" \
-     >"/tmp/prepush-$1.log" 2>&1)
-  python - "$1" "$2" "$3" "$4" <<'PY' || fail "$2 eval below $3 (see /tmp/prepush-$1.json)"
-import json, sys
-name, label, need, var = sys.argv[1], sys.argv[2], int(sys.argv[3]), sys.argv[4]
-rs = json.load(open(f"/tmp/prepush-{name}.json"))["results"]["results"]
-ok = sum(r["success"] for r in rs)
-print(f"pre-push: {label} eval {ok}/{len(rs)}")
-for r in rs:
-    if not r["success"]:
-        print("  FAIL:", str(r["vars"].get(var, ""))[:70], "->", (r.get("gradingResult") or {}).get("reason"))
-sys.exit(0 if ok >= need else 1)
-PY
-}
-
-if echo "$changed" | grep -qE '^(agents/|core/|tools/|evals/lab_ops/)'; then
-  echo "pre-push: agent files changed - running Lab Ops eval (~4 min)"
-  run_eval lab_ops "Lab Ops" 27 question
-else
-  echo "pre-push: no agent files changed - Lab Ops eval skipped"
-fi
-
-if echo "$changed" | grep -qE '^(agents/test_planner/|core/(recipes|mcp|guard|models)\.py|tools/agfhc/|config/plan_templates/|sim/|evals/planner/)'; then
-  echo "pre-push: planner files changed - running planner eval (~2 min)"
-  run_eval planner "Planner" 20 requirements
-else
-  echo "pre-push: no planner files changed - planner eval skipped"
-fi
+# Pre-push check. Install once:  ln -sf ../../scripts/pre-push .git/hooks/pre-push
+# Fast on purpose: git keeps the GitHub connection open while this runs and GitHub drops it after a few minutes.
+# If the push brings in agent or planner changes, the pushed commit must carry a stamp from scripts/gate.
+# Otherwise (docs, configs outside those paths) it runs the unit tests only.
+source "$(dirname "$(readlink -f "$0")")/gate-common.sh"
+while read -r local_ref local_sha remote_ref remote_sha; do
+  [ "$local_sha" = "0000000000000000000000000000000000000000" ] && continue      # deleting a branch
+  if [ -f "$STAMPS/$local_sha" ]; then
+    echo "pre-push: $(git rev-parse --short "$local_sha") passed scripts/gate - ok"
+    continue
+  fi
+  if [ "$(git rev-parse HEAD)" = "$local_sha" ] && needs_evals; then
+    echo "pre-push: this push changes agents/tools/evals but $(git rev-parse --short "$local_sha") has no gate stamp."
+    echo "pre-push: run  scripts/gate  (about 6 min), then push again - push blocked"
+    exit 1
+  fi
+  .venv/bin/python -m pytest -q tests/ >/tmp/prepush-pytest.log 2>&1 \
+    || { echo "pre-push: unit tests failed (see /tmp/prepush-pytest.log) - push blocked"; exit 1; }
+  echo "pre-push: unit tests ok (no agent changes, evals not needed)"
+done
+exit 0

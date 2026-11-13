@@ -72,7 +72,7 @@ def test_mem0_index_used_when_available(archive, tmp_path):
 def test_pending_lists_unconfirmed_fail_archives(archive, tmp_path):
     st = EpisodeStore(tmp_path / "eps")
     assert pending(archive.parent, st) == [(archive.name, False)]
-    st.confirm(archive, "hardware", "x", triage_dir=tmp_path / "none")
+    st.confirm(archive, "hardware", "bad HBM stack on GPU-05", triage_dir=tmp_path / "none")
     assert pending(archive.parent, st) == []
 
 

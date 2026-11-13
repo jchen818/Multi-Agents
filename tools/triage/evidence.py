@@ -34,6 +34,45 @@ def normalize(line: str) -> str:
     return line.strip()
 
 
+_ISO = re.compile(r"(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2}):(\d{2})(?:[.,]\d+)?([+-]\d{2}:?\d{2}|Z)?")
+_COMPACT = re.compile(r"\b(\d{4})(\d{2})(\d{2})-(\d{2})(\d{2})(\d{2})\b")
+
+
+def line_epoch(line: str, tz: str = "America/Los_Angeles"):
+    """Epoch seconds of the first timestamp in a log line (ISO with or without offset, or AGFHC's YYYYmmdd-HHMMSS),
+    else None. Timestamps without an offset are read in the archive's timezone."""
+    from datetime import datetime, timezone, timedelta
+    try:
+        from zoneinfo import ZoneInfo
+        local = ZoneInfo(tz)
+    except Exception:
+        local = timezone.utc
+    m = _ISO.search(line)
+    if m:
+        y, mo, d, h, mi, s, off = m.groups()
+        if off in (None, ""):
+            tzinfo = local
+        elif off == "Z":
+            tzinfo = timezone.utc
+        else:
+            sign = 1 if off[0] == "+" else -1
+            hh, mm = int(off[1:3]), int(off[-2:])
+            tzinfo = timezone(sign * timedelta(hours=hh, minutes=mm))
+        return datetime(int(y), int(mo), int(d), int(h), int(mi), int(s), tzinfo=tzinfo).timestamp()
+    m = _COMPACT.search(line)
+    if m:
+        y, mo, d, h, mi, s = map(int, m.groups())
+        return datetime(y, mo, d, h, mi, s, tzinfo=local).timestamp()
+    return None
+
+
+def before_run(ev: "Evidence", line: str, slack_s: int = 120) -> bool:
+    """True if the line carries a timestamp clearly before this run started (e.g. boot messages in dmesg_full)."""
+    start = ev.summary.get("start_epoch")
+    t = line_epoch(line, ev.summary.get("timezone") or "America/Los_Angeles")
+    return bool(start and t and t < float(start) - slack_s)
+
+
 def clean_lines(text: str) -> list:
     """Lines as a reader sees them: ANSI codes removed, carriage-return redraws split, trailing space trimmed."""
     out = []

@@ -72,6 +72,7 @@ def test_fail_scenario_archives_and_reports(srv, monkeypatch, tmp_path):
     assert summary["verdict"] == "FAIL" and summary["failed"]
     assert summary["results_source"] == "results.json"
     assert (arch[0] / "report.html").exists() and (arch[0] / "logs" / "console.log").exists()
+    assert "GPU" in (arch[0] / "logs" / "gpu_usage_start.txt").read_text()      # GPU usage when the run started
     fin = run(srv.finalize_report("sim", run_id, "One test failed; see failure details."))
     assert "report.html" in fin
     assert "One test failed" in (arch[0] / "report.html").read_text()

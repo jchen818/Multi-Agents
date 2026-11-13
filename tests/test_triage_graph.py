@@ -145,3 +145,33 @@ def test_no_structured_answer_does_not_crash(archive):
     assert all(c["why"] == "no supporting log line" for c in out["dropped"])
     assert sum(1 for s, _ in m.prompts if s == "Score") == 2 * 8      # one retry per score, 5 + 3 refined
     assert "No hypothesis survived verification" in out["report"]
+
+
+def test_summary_quote_is_removed_not_fatal_and_duplicates_collapse(archive):
+    class F(Fake):
+        def answer(self, schema, u):
+            if schema is Score and "reads before it writes" in u:
+                return Score(score=0.6, support=[{"text": "New kernel messages during the run: none"},
+                                                 {"file": "console.log", "text": CONSOLE}], reasoning="r")
+            return super().answer(schema, u)
+    out = run(build_graph(F()), archive)
+    tool = [c for c in out["ranked"] if c["hyp"]["category"] == "test tool/config defect"]
+    assert tool and tool[0]["removed_citations"] == ["New kernel messages during the run: none"]
+    causes = [c["hyp"]["cause"] for c in out["ranked"]]
+    assert "HBM stack fault on GPU-05" not in causes and any(c.startswith("refined") for c in causes)
+    assert any(c["why"].startswith("duplicate of: refined") for c in out["dropped"])
+
+
+def test_prompts_ask_for_node_state_and_mark_old_lines():
+    from agents.triage.graph import SYSTEM, CATEGORIES, _fmt_hits
+    from tools.triage.evidence import Evidence, before_run, line_epoch
+    assert "environment/node state" in CATEGORIES and "model server" in SYSTEM
+    ev = Evidence(root=Path("."), summary={"start_epoch": line_epoch("2026-10-23 13:45:52"),
+                                           "timezone": "America/Los_Angeles"})
+    boot = "2026-10-12T15:54:09,312381-07:00 pci 0000:70:01.1: bridge window [io size 0x3000]: failed to assign"
+    during = "20261023-134600 INFO | pcie_bidi_peak | TEST_GEN_TB_TOOL_EXECUTION_FAIL"
+    assert before_run(ev, boot) and not before_run(ev, during) and not before_run(ev, "no timestamp here")
+    txt = _fmt_hits([("logs/dmesg_full.log", 1983, boot), ("logs/journal.log", 7, during)], ev)
+    assert txt.splitlines()[0].startswith("[logs/dmesg_full.log:1983] (LOGGED BEFORE THIS RUN STARTED)")
+    assert "BEFORE" not in txt.splitlines()[1]
+    assert line_epoch("2026-10-12T15:54:09-07:00") == line_epoch("2026-10-12T22:54:09Z")

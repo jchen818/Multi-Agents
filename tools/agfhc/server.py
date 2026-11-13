@@ -529,7 +529,9 @@ async def start_run(confirm_token: str) -> str:
               f"date +%s > {q(d)}/start_epoch; {{ {_version_script(node)}; }} > {q(d)}/versions.txt 2>/dev/null || true; "
               f"{{ {_inventory_script(node)}\n}} > {q(d)}/inventory.tsv 2>/dev/null || true; "
               f"cut -d' ' -f1 /proc/uptime > {q(d)}/start_uptime; "
-              f"{s}dmesg 2>/dev/null | grep -iwE '{L.DMESG_FILTER}' > {q(d)}/dmesg_before.log || true; " + launch)
+              f"{s}dmesg 2>/dev/null | grep -iwE '{L.DMESG_FILTER}' > {q(d)}/dmesg_before.log || true; "
+              f"{{ export PATH=$PATH:/opt/rocm/bin; rocm-smi --showmemuse; rocm-smi --showpids; }} > {q(d)}/gpu_usage_start.txt 2>&1 || true; "
+              + launch)
     rc, out, err = await asyncio.to_thread(_exec, node, script)
     if rc == 3:
         return f"NOT STARTED: {node} already has an active AGFHC run ({out.strip()})"

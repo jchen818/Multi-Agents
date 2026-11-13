@@ -19,7 +19,7 @@ tests:
   - vars: {case: seed-xgmi-link-down}
   - vars: {case: seed-thermal-throttle}
   - vars: {case: seed-power-brake}
-  - vars: {case: seed-driver-ring-timeout}
-  - vars: {case: seed-driver-kfd-fault}
+  - vars: {case: seed-driver-amdgpu-oops}
+  - vars: {case: seed-rocm-mixed-install}
   - vars: {case: seed-fw-vbios-mismatch}
   - vars: {case: seed-fw-pmfw-old}

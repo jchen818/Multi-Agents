@@ -132,35 +132,35 @@ cases:
     gpu_usage: idle
     key: "throttle status: PPT active 100% of run on GPU-00..GPU-07, socket power capped at 600 W (expected 1000 W)"
 
-  - id: seed-driver-ring-timeout
+  # Driver cases must point at the driver itself. A ring timeout + reset alone is ambiguous (often hardware/firmware),
+  # and a VM fault from a test's own hipErrorIllegalAddress usually means a test bug (both replaced after the first run).
+  - id: seed-driver-amdgpu-oops
     kind: seeded
     category: driver/ROCm
-    cause: amdgpu ring timeout and GPU reset during the compute test (driver/firmware hang)
+    cause: kernel NULL pointer dereference inside the amdgpu driver (amdgpu_vm_bo_update) during the compute test
     recipe: gfx_lvl1
     failed:
-      - {test: gfx_dgemm, status: TEST_TIMEOUT, subject: GPU-02, time: "00:02:00", limit: "00:02:00",
-         lines: ["GPU-02 no progress for 60 s, test aborted"]}
+      - {test: gfx_dgemm, status: TEST_GEN_TOOL_EXECUTION_FAIL, subject: GPU-ALL, time: "00:00:31", limit: "00:02:00",
+         lines: ["all GPUs: process killed, device lost (hipErrorDeinitialized)"]}
     dmesg_new: |
-      2026-11-02T13:10:44,200100-08:00 amdgpu 0000:25:00.0: amdgpu: ring comp_1.2.0 timeout, signaled seq=88124, emitted seq=88127
-      2026-11-02T13:10:44,200300-08:00 amdgpu 0000:25:00.0: amdgpu: GPU reset begin!
-      2026-11-02T13:10:47,910000-08:00 amdgpu 0000:25:00.0: amdgpu: GPU reset(1) succeeded!
+      2026-11-02T13:10:44,200100-08:00 BUG: kernel NULL pointer dereference, address: 0000000000000048
+      2026-11-02T13:10:44,200150-08:00 RIP: 0010:amdgpu_vm_bo_update+0x1a4/0x9d0 [amdgpu]
+      2026-11-02T13:10:44,200200-08:00 Call Trace: amdgpu_gem_va_ioctl+0x2f1/0x380 [amdgpu] drm_ioctl+0x26f/0x4a0
+      2026-11-02T13:10:44,200300-08:00 Modules linked in: amdgpu(OE) amdxcp drm_buddy gpu_sched
     gpu_usage: idle
-    key: "amdgpu: ring comp_1.2.0 timeout, signaled seq=88124, emitted seq=88127"
+    key: "RIP: 0010:amdgpu_vm_bo_update+0x1a4/0x9d0 [amdgpu]"
 
-  - id: seed-driver-kfd-fault
+  - id: seed-rocm-mixed-install
     kind: seeded
     category: driver/ROCm
-    cause: KFD/VM page fault on GPU-00 during the DMA test (driver or ROCm runtime fault)
-    recipe: dma_lvl1
+    cause: ROCm install is mixed (HIP runtime 6.4 libraries with ROCm 7.2.1), so no code object loads for gfx942
+    recipe: gfx_lvl1
     failed:
-      - {test: dma_sdma_copy, status: TEST_DMA_FAIL, subject: GPU-00, time: "00:00:07", limit: "00:01:00",
-         lines: ["hipMemcpyAsync returned hipErrorIllegalAddress on GPU-00"]}
-    dmesg_new: |
-      2026-11-02T14:02:11,001000-08:00 amdgpu 0000:05:00.0: amdgpu: [gfxhub] page fault (src_id:0 ring:24 vmid:8 pasid:32774)
-      2026-11-02T14:02:11,001100-08:00 amdgpu 0000:05:00.0: amdgpu:   in process dma_sdma_copy pid 51122 thread dma_sdma_copy pid 51122
-      2026-11-02T14:02:11,001200-08:00 amdgpu 0000:05:00.0: amdgpu: VM_L2_PROTECTION_FAULT_STATUS:0x00800932
+      - {test: gfx_sgemm, status: TEST_GEN_TOOL_EXECUTION_FAIL, subject: GPU-ALL, time: "00:00:00", limit: "00:02:00",
+         lines: ["hipErrorNoBinaryForGpu: Unable to find code object for all current devices!",
+                 "Devices: device=0 [gfx942:sramecc+:xnack-] ... libamdhip64.so.6 loaded from /opt/rocm-6.4.0/lib (expected /opt/rocm-7.2.1/lib)"]}
     gpu_usage: idle
-    key: "amdgpu: VM_L2_PROTECTION_FAULT_STATUS:0x00800932"
+    key: "Devices: device=0 [gfx942:sramecc+:xnack-] ... libamdhip64.so.6 loaded from /opt/rocm-6.4.0/lib (expected /opt/rocm-7.2.1/lib)"
 
   - id: seed-fw-vbios-mismatch
     kind: seeded

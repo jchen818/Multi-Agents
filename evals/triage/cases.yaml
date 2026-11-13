@@ -1,0 +1,186 @@
+# Triage eval cases (Phase 3). kind: bug = rebuilt from a fixed Bugzilla bug's own quoted evidence (its bug is held
+# out of retrieval for that case); seeded = a synthetic failure with a known injected cause; real = an archive with an
+# engineer-confirmed cause (added with `agents.triage.episodes confirm`, archive outside git).
+# Accuracy is reported for real and bug cases; seeded cases are a regression check of the reasoning.
+# key: the one log line that settles the case; tests check it exists verbatim in the built archive.
+defaults:
+  recipe: all_lvl1
+  versions: {AGFHC: "agfhc version: 1.30.2", ROCM: "7.2.1", AMDGPU: "6.16.13", KERNEL: "6.8.0-146-generic",
+             GPU_MODEL: "AMD Instinct MI325X", GPU_COUNT: "8", VBIOS: "00177162", BIOS: "01.25.06.08"}
+
+cases:
+  - id: bug22-hbm-read-before-write
+    kind: bug
+    exclude_bugs: [22]
+    category: test tool/config defect
+    cause: hbm_ds_ntd reads memory before the pattern is written (all-zero reads), reported as HBM miscompare
+    recipe: all_lvl5
+    failed:
+      - {test: hbm_ds_ntd, status: HBM_MISCOMPARE, subject: GPU-02, time: "00:00:41", limit: "00:15:00",
+         lines: ["2026-10-06 10:12:03.114 FATL| R0 GPU-02 3840 miscompares at iteration 0",
+                 "2026-10-06 10:12:03.115 INFO| miscompare words read=0x0000000000000000 expected=0xa5a5a5a5a5a5a5a5 xor=0xa5a5a5a5a5a5a5a5",
+                 "2026-10-06 10:12:03.116 INFO| all 11520 captured words read 0x0000000000000000; 0 non-zero"]}
+    dmesg_new: ""
+    key: "all 11520 captured words read 0x0000000000000000; 0 non-zero"
+
+  - id: bug23-rochpl-oversized
+    kind: bug
+    exclude_bugs: [23]
+    category: test tool/config defect
+    cause: rocHPL config requests more device memory (241.767 GiB) than the usable HBM (238.4 GiB)
+    recipe: gfx_lvl4
+    failed:
+      - {test: rochpl, status: TEST_ROCHPL_FAIL, subject: GPU-ALL, time: "00:00:09", limit: "00:30:00",
+         lines: ["Local matrix size       = 241.767 GiBs",
+                 "HPL ERROR from process # 0, on line 166 of function HPL_pdmatgen:",
+                 ">>> [3,1] Device memory allocation failed for A and b. Requested 241.767 GiBs total. Test Skiped"]}
+    journal: "INFO | rochpl | Executing command: 'ROCR_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 /opt/amd/rochpl/mpirun_rochpl -P 4 -Q 2 -N 509440 --NB 640'"
+    gpu_usage: idle
+    key: ">>> [3,1] Device memory allocation failed for A and b. Requested 241.767 GiBs total. Test Skiped"
+
+  - id: bug24-rvs-gm-segfault
+    kind: bug
+    exclude_bugs: [24]
+    category: test tool/config defect
+    cause: RVS gm module (libgm.so) segfaults; defect in the RVS package, not the GPUs
+    recipe: all_lvl2
+    failed:
+      - {test: rvs_gm, status: TEST_RVS_FAIL, subject: GPU-ALL, time: "00:00:02", limit: "00:05:00",
+         lines: ["[RESULT] [ 412.551] Action name :gm_single", "Segmentation fault (core dumped) rvs -c /opt/rocm/share/rocm-validation-suite/conf/gm_single.conf",
+                 "rvs: libgm.so: segfault at 0 ip 00007f3a1c2b4e10 sp 00007ffd5b2a1c80 error 4 in libgm.so"]}
+    dmesg_new: "rvs[48812]: segfault at 0 ip 00007f3a1c2b4e10 sp 00007ffd5b2a1c80 error 4 in libgm.so.1.0.0[7f3a1c2a0000+20000]"
+    key: "rvs: libgm.so: segfault at 0 ip 00007f3a1c2b4e10 sp 00007ffd5b2a1c80 error 4 in libgm.so"
+
+  - id: seed-env-vllm-holds-hbm
+    kind: seeded
+    category: environment/node state
+    cause: GPU memory held by another process (python3 / model server) so the test could not allocate its buffer
+    failed:
+      - {test: hbm_s16_ds, status: TEST_HBM_STRESS_FAIL, subject: GPU-05, time: "00:00:04", limit: "00:01:20",
+         lines: ["2026-11-02 09:14:40.528 FATL| ABORT: R1 GPU-05 failed to allocate buffer.", "Aborted (core dumped)"]}
+    gpu_usage: busy
+    key: "GPU[5]		: GPU Memory Allocated (VRAM%): 92"
+
+  - id: seed-env-tb-busy
+    kind: seeded
+    category: environment/node state
+    cause: TransferBench could not start because other processes held the GPUs
+    failed:
+      - {test: pcie_bidi_peak, status: TEST_GEN_TB_TOOL_EXECUTION_FAIL, subject: GPU-ALL, time: "00:00:00", limit: "00:00:50",
+         lines: ["TransferBench: hipMalloc failed on GPU 4: out of memory (hipErrorOutOfMemory)"]}
+    gpu_usage: busy
+    key: "TransferBench: hipMalloc failed on GPU 4: out of memory (hipErrorOutOfMemory)"
+
+  - id: seed-hw-hbm-ue
+    kind: seeded
+    category: hardware
+    cause: uncorrectable HBM (UMC) errors on GPU-03 with non-zero bit flips; failing HBM stack
+    failed:
+      - {test: hbm_s16_ds, status: TEST_HBM_STRESS_FAIL, subject: GPU-03, time: "00:00:52", limit: "00:01:20",
+         lines: ["2026-11-02 10:01:13.002 FATL| R1 GPU-03 pattern miscompare at 0x3a41f000 read=0xa5a5a5a5a5a1a5a5 expected=0xa5a5a5a5a5a5a5a5",
+                 "2026-11-02 10:01:13.003 INFO| 17 miscompares, all on channel 6 pseudo-channel 1, single-bit and double-bit flips"]}
+    dmesg_new: |
+      2026-11-02T10:01:12,991204-08:00 amdgpu 0000:45:00.0: amdgpu: [Hardware Error]: UMC0 uncorrectable error in HBM channel 6
+      2026-11-02T10:01:12,991310-08:00 amdgpu 0000:45:00.0: amdgpu: 1 uncorrectable hardware errors detected in umc block
+      2026-11-02T10:01:12,991402-08:00 amdgpu 0000:45:00.0: amdgpu: RAS: bad page 0x3a41f retired
+    gpu_usage: idle
+    key: "amdgpu: 1 uncorrectable hardware errors detected in umc block"
+
+  - id: seed-hw-pcie-downtrain
+    kind: seeded
+    category: hardware
+    cause: GPU-06 PCIe link trained at Gen4 x8 instead of Gen5 x16 (riser or slot fault)
+    failed:
+      - {test: pcie_link_status, status: TEST_PCIE_LINK_STATUS_FAIL, subject: GPU-06, time: "00:00:01", limit: "00:00:08",
+         lines: ["GPU-06 link speed 16.0 GT/s (expected 32.0 GT/s), width x8 (expected x16)"]}
+    dmesg_new: "2026-11-02T11:20:01,100200-08:00 pcieport 0000:d0:01.1: AER: Corrected error message received from 0000:d1:00.0"
+    gpu_usage: idle
+    key: "GPU-06 link speed 16.0 GT/s (expected 32.0 GT/s), width x8 (expected x16)"
+
+  - id: seed-xgmi-link-down
+    kind: seeded
+    category: XGMI link
+    cause: XGMI link between GPU-01 and GPU-04 down; peer bandwidth zero on that pair
+    recipe: xgmi_lvl1
+    failed:
+      - {test: xgmi_a2a, status: TEST_XGMI_BW_FAIL, subject: GPU-01, time: "00:00:12", limit: "00:00:25",
+         lines: ["GPU-01 -> GPU-04 bandwidth 0.0 GB/s (expected >= 48.0 GB/s)", "GPU-04 -> GPU-01 bandwidth 0.0 GB/s (expected >= 48.0 GB/s)"]}
+    dmesg_new: "2026-11-02T12:00:05,500100-08:00 amdgpu 0000:15:00.0: amdgpu: XGMI: link 3 to node 4 is down"
+    gpu_usage: idle
+    key: "amdgpu: XGMI: link 3 to node 4 is down"
+
+  - id: seed-thermal-throttle
+    kind: seeded
+    category: thermal/power
+    cause: GPU-07 hit thermal limits and throttled; performance below threshold
+    recipe: gfx_lvl1
+    failed:
+      - {test: gfx_maxpower, status: TEST_PERF_BELOW_THRESHOLD, subject: GPU-07, time: "00:05:00", limit: "00:05:00",
+         lines: ["GPU-07 sustained 412 TFLOPS (threshold 520)", "GPU-07 hotspot 105C, throttle status: THERMAL_HOTSPOT active 61% of run"]}
+    dmesg_new: ""
+    gpu_usage: idle
+    key: "GPU-07 hotspot 105C, throttle status: THERMAL_HOTSPOT active 61% of run"
+
+  - id: seed-power-brake
+    kind: seeded
+    category: thermal/power
+    cause: power brake / PPT limit engaged on all GPUs (PSU or power capping), clocks capped
+    recipe: gfx_lvl1
+    failed:
+      - {test: gfx_maxpower, status: TEST_PERF_BELOW_THRESHOLD, subject: GPU-ALL, time: "00:05:00", limit: "00:05:00",
+         lines: ["all GPUs sustained 300-330 TFLOPS (threshold 520)", "throttle status: PPT active 100% of run on GPU-00..GPU-07, socket power capped at 600 W (expected 1000 W)"]}
+    gpu_usage: idle
+    key: "throttle status: PPT active 100% of run on GPU-00..GPU-07, socket power capped at 600 W (expected 1000 W)"
+
+  - id: seed-driver-ring-timeout
+    kind: seeded
+    category: driver/ROCm
+    cause: amdgpu ring timeout and GPU reset during the compute test (driver/firmware hang)
+    recipe: gfx_lvl1
+    failed:
+      - {test: gfx_dgemm, status: TEST_TIMEOUT, subject: GPU-02, time: "00:02:00", limit: "00:02:00",
+         lines: ["GPU-02 no progress for 60 s, test aborted"]}
+    dmesg_new: |
+      2026-11-02T13:10:44,200100-08:00 amdgpu 0000:25:00.0: amdgpu: ring comp_1.2.0 timeout, signaled seq=88124, emitted seq=88127
+      2026-11-02T13:10:44,200300-08:00 amdgpu 0000:25:00.0: amdgpu: GPU reset begin!
+      2026-11-02T13:10:47,910000-08:00 amdgpu 0000:25:00.0: amdgpu: GPU reset(1) succeeded!
+    gpu_usage: idle
+    key: "amdgpu: ring comp_1.2.0 timeout, signaled seq=88124, emitted seq=88127"
+
+  - id: seed-driver-kfd-fault
+    kind: seeded
+    category: driver/ROCm
+    cause: KFD/VM page fault on GPU-00 during the DMA test (driver or ROCm runtime fault)
+    recipe: dma_lvl1
+    failed:
+      - {test: dma_sdma_copy, status: TEST_DMA_FAIL, subject: GPU-00, time: "00:00:07", limit: "00:01:00",
+         lines: ["hipMemcpyAsync returned hipErrorIllegalAddress on GPU-00"]}
+    dmesg_new: |
+      2026-11-02T14:02:11,001000-08:00 amdgpu 0000:05:00.0: amdgpu: [gfxhub] page fault (src_id:0 ring:24 vmid:8 pasid:32774)
+      2026-11-02T14:02:11,001100-08:00 amdgpu 0000:05:00.0: amdgpu:   in process dma_sdma_copy pid 51122 thread dma_sdma_copy pid 51122
+      2026-11-02T14:02:11,001200-08:00 amdgpu 0000:05:00.0: amdgpu: VM_L2_PROTECTION_FAULT_STATUS:0x00800932
+    gpu_usage: idle
+    key: "amdgpu: VM_L2_PROTECTION_FAULT_STATUS:0x00800932"
+
+  - id: seed-fw-vbios-mismatch
+    kind: seeded
+    category: firmware/BKC
+    cause: GPU-04 runs a different VBIOS than the other seven; firmware not updated with the BKC
+    failed:
+      - {test: gpu_info, status: TEST_FW_VERSION_MISMATCH, subject: GPU-04, time: "00:00:01", limit: "00:00:10",
+         lines: ["GPU-04 VBIOS 00168420 differs from GPU-00..03,05..07 VBIOS 00177162"]}
+    versions: {VBIOS: "00177162,00168420"}
+    gpu_usage: idle
+    key: "GPU-04 VBIOS 00168420 differs from GPU-00..03,05..07 VBIOS 00177162"
+
+  - id: seed-fw-pmfw-old
+    kind: seeded
+    category: firmware/BKC
+    cause: PMFW/SMU firmware older than the BKC requires; driver warns of an interface mismatch
+    recipe: gfx_lvl1
+    failed:
+      - {test: gfx_maxpower, status: TEST_GEN_TOOL_EXECUTION_FAIL, subject: GPU-ALL, time: "00:00:03", limit: "00:05:00",
+         lines: ["power telemetry unavailable: SMU message 0x2f not supported"]}
+    dmesg_new: "2026-11-02T15:30:02,300000-08:00 amdgpu 0000:05:00.0: amdgpu: SMU driver if version not matched: smu fw if version = 0x00000008, driver if version = 0x0000000b"
+    gpu_usage: idle
+    key: "amdgpu: SMU driver if version not matched: smu fw if version = 0x00000008, driver if version = 0x0000000b"

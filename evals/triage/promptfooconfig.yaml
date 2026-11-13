@@ -1,0 +1,25 @@
+description: Phase 3 - failure triage (gemma + bug history), 14 cases from cases.yaml
+prompts: ["{{case}}"]
+providers:
+  - id: file://provider.py
+    label: triage
+    config: {pythonExecutable: /home/mitac/Multi-Agents/.venv/bin/python, timeout: 900000}
+evaluateOptions: {maxConcurrency: 2}
+defaultTest:
+  assert: [{type: javascript, value: "file://lib.js:check"}]
+# One test per case id; add a case to cases.yaml, then add its id here.
+tests:
+  - vars: {case: bug22-hbm-read-before-write}
+  - vars: {case: bug23-rochpl-oversized}
+  - vars: {case: bug24-rvs-gm-segfault}
+  - vars: {case: seed-env-vllm-holds-hbm}
+  - vars: {case: seed-env-tb-busy}
+  - vars: {case: seed-hw-hbm-ue}
+  - vars: {case: seed-hw-pcie-downtrain}
+  - vars: {case: seed-xgmi-link-down}
+  - vars: {case: seed-thermal-throttle}
+  - vars: {case: seed-power-brake}
+  - vars: {case: seed-driver-ring-timeout}
+  - vars: {case: seed-driver-kfd-fault}
+  - vars: {case: seed-fw-vbios-mismatch}
+  - vars: {case: seed-fw-pmfw-old}

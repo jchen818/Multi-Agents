@@ -207,6 +207,12 @@ def evidence_markdown(ev: Evidence, budget: int = 9000) -> str:
         for f in ev.failures:
             parts.append(f"- `{f['test']}`: {f['status']} on {f['subject'] or '?'}")
             parts += [f"    {l}" for l in f["lines"][:8]]
+    usage = next((n for n in ev.docs if n.endswith("gpu_usage_start.txt")), None)
+    if usage:
+        parts.append("### GPU memory and processes when the run started (rocm-smi)")
+        parts += [f"[{usage}:{i}] {l}" for i, l in enumerate(ev.docs[usage][:24], 1)]
+    else:
+        parts.append("### GPU memory when the run started: not recorded in this archive")
     kern = [h for h in grep(ev, r".", 60, "dmesg_new")]
     parts.append("### New kernel messages during the run" + ("" if kern else ": none"))
     parts += [f"[{n}:{i}] {l}" for n, i, l in kern[:40]]

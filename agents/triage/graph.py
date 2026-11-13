@@ -60,8 +60,17 @@ class Score(BaseModel):
 
 
 class Judge(BaseModel):
-    supported: bool = Field(description="do the cited lines actually support the stated cause?")
+    supported: bool = Field(description="are the cited lines specific evidence for this cause (not proof)?")
     why: str
+
+
+JUDGE_PROMPT = ("Cause: {cause}\nCited lines:\n{lines}\n\nDecide whether these lines are real, specific evidence for "
+                "this cause. PASS when the lines are about this failure and the cause explains them specifically, better "
+                "than a generic 'the test failed' (example: every captured word reading 0x0 is specific evidence that the "
+                "memory was never written; an allocation failure with other processes holding VRAM is specific evidence "
+                "the node was not free). FAIL when the lines are unrelated to the cause, or only show that a test failed "
+                "without anything that favors this cause. Do not require the logs to prove the whole mechanism or to rule "
+                "out every alternative: other candidates are ranked separately.")
 
 
 class BugDraft(BaseModel):
@@ -98,6 +107,14 @@ def _fmt_hits(hits, ev=None) -> str:
 
 
 MARKER = re.compile(r"^\s*(\[[^\]]+:\d+\]\s*)?(\(LOGGED BEFORE THIS RUN STARTED\)\s*)?")
+
+
+def _from_summary(text: str, summary_lines: set) -> bool:
+    """A quote of our evidence summary, possibly trimmed or slightly reworded by the model (e.g. the '## Run ...'
+    header): its opening words appear in a summary line, or the whole quote does."""
+    t = text.strip(" `#*")
+    head = t[:32]
+    return bool(t) and any(t in s or (len(head) >= 16 and head in s) for s in summary_lines)
 
 
 def _clean_cites(cs: list) -> list:
@@ -233,7 +250,7 @@ def build_graph(model, judge_model=None, bug_search=None, max_calls: int = MAX_L
             agn = verify_citations(ev, _clean_cites(c.get("against") or []))
             # A quote of our own evidence summary (a heading such as "New kernel messages during the run: none") is
             # not a log line, but not an invention either: remove that citation and keep judging the candidate.
-            from_summary = [x for x in sup + agn if not x["ok"] and any(x["text"] in s for s in summary_lines)]
+            from_summary = [x for x in sup + agn if not x["ok"] and _from_summary(x["text"], summary_lines)]
             sup = [x for x in sup if x not in from_summary]
             agn = [x for x in agn if x not in from_summary]
             c["removed_citations"] = [x["text"] for x in from_summary]
@@ -253,8 +270,7 @@ def build_graph(model, judge_model=None, bug_search=None, max_calls: int = MAX_L
                 judged.append(dict(c, judge="not judged (budget)"))
                 continue
             lines = "\n".join(f"[{x['where']}] {x['text']}" for x in c["support_v"])
-            j = await ask(state, Judge, f"Cause: {c['hyp']['cause']}\nCited lines:\n{lines}\n\nDo these lines support "
-                                        "the cause, or are they unrelated or too weak?", m=judge_model)
+            j = await ask(state, Judge, JUDGE_PROMPT.format(cause=c["hyp"]["cause"], lines=lines), m=judge_model)
             if j is None:
                 judged.append(dict(c, judge="not judged (no structured answer)"))
             elif j.supported:

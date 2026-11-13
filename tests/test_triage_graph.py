@@ -210,3 +210,18 @@ def test_draft_is_revised_when_critique_finds_problems_and_carries_the_command(a
     d = out["draft"]
     assert d["description"].startswith("Command: `") and "Fixed: GPU-05 only." in d["description"]
     assert d["revised_for"] == ["next steps say GPU 1 but evidence says GPU-05"]
+
+
+def test_reworded_summary_header_is_a_summary_quote():
+    from agents.triage.graph import _from_summary
+    summary = {"## run eval-bug22-hbm-read-before-write on eval-node · recipe `all_lvl5` · verdict **fail** (rc 13)".lower()}
+    from tools.triage.evidence import _norm
+    s = {_norm(x) for x in summary}
+    assert _from_summary(_norm("Run eval-bug22-hbm-read-before-write on eval-node · recipe `").lower(), s)
+    assert not _from_summary("amdgpu: 1 uncorrectable hardware errors detected in umc block", s)
+
+
+def test_judge_prompt_asks_for_evidence_not_proof():
+    from agents.triage.graph import JUDGE_PROMPT
+    p = JUDGE_PROMPT.format(cause="c", lines="l")
+    assert "Do not require the logs to prove" in p and "only show that a test failed" in p

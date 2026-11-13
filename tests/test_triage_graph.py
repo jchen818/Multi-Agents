@@ -225,3 +225,11 @@ def test_judge_prompt_asks_for_evidence_not_proof():
     from agents.triage.graph import JUDGE_PROMPT
     p = JUDGE_PROMPT.format(cause="c", lines="l")
     assert "Do not require the logs to prove" in p and "only show that a test failed" in p
+
+
+def test_categories_are_defined_for_the_model(archive):
+    from agents.triage.graph import CATEGORY_HELP, CATEGORIES
+    assert all(c in CATEGORY_HELP for c in CATEGORIES) and "mixed or partial ROCm install" in CATEGORY_HELP
+    m = Fake()
+    run(build_graph(m), archive)
+    assert CATEGORY_HELP in next(u for s, u in m.prompts if s == "Hypotheses")

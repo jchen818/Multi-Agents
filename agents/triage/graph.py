@@ -29,6 +29,13 @@ MAX_LLM_CALLS = 25
 BEAM = 3
 CATEGORIES = ("driver/ROCm", "firmware/BKC", "XGMI link", "thermal/power", "hardware", "test tool/config defect",
               "environment/node state")
+CATEGORY_HELP = (
+    "Categories: driver/ROCm = the installed software stack (amdgpu kernel driver, ROCm/HIP libraries, their versions "
+    "and how they are installed, e.g. a mixed or partial ROCm install, a driver oops); firmware/BKC = VBIOS, PMFW/SMU, "
+    "BIOS and BKC versions or settings; XGMI link = GPU-to-GPU links; thermal/power = temperature, throttling, power "
+    "limits; hardware = a physical fault (HBM errors, PCIe link trained wrong, a failing part); test tool/config defect "
+    "= the test program or its configuration (AGFHC/RVS bug, wrong parameters); environment/node state = runtime "
+    "conditions on the node (other processes holding GPUs or memory, the node not dedicated or not idle).")
 Category = Literal["driver/ROCm", "firmware/BKC", "XGMI link", "thermal/power", "hardware", "test tool/config defect",
                    "environment/node state"]
 
@@ -191,7 +198,7 @@ def build_graph(model, judge_model=None, bug_search=None, max_calls: int = MAX_L
     async def hypothesize(state: State):
         user = (f"<evidence>\n{state['evidence']}\n</evidence>\n\nMessage shapes (count, first [file:line], shape):\n"
                 f"{state['patterns']}\n\n<history>\n{state['history']}\n</history>\n\n"
-                f"Propose 5 candidate root causes across different categories ({', '.join(CATEGORIES)}). Include at "
+                f"{CATEGORY_HELP}\n\nPropose 5 candidate root causes across different categories ({', '.join(CATEGORIES)}). Include at "
                 "least one 'test tool/config defect', one 'hardware' and one 'environment/node state' candidate (were the "
                 "GPUs free when the test started?). For each give 1-4 regexes to search the logs.")
         out = await ask(state, Hypotheses, user)

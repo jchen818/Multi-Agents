@@ -113,15 +113,15 @@ def _archive_target(name: str) -> dict:
 
 def _sim_env() -> dict:
     env = dict(os.environ)
-    env.update(PATH=f"{ROOT / 'sim/bin'}:{env.get('PATH', '/usr/bin:/bin')}", SIM_DATA=str(ROOT / "sim/data"),
-               FAKE_ROOTLOG=str(SIM_DIR / "rootlog"))
+    env.update(PATH=f"{ROOT / 'sim/bin'}:{env.get('PATH', '/usr/bin:/bin')}", SIM_DATA=os.environ.get("SIM_DATA") or str(ROOT / "sim/data"),
+               FAKE_ROOTLOG=str(SIM_DIR / "rootlog"), SIM_BIOS=os.environ.get("SIM_BIOS") or "SIM-BIOS-1.0")
     return env
 
 
 def _sim_exports() -> str:
     """Exports written into run.sh so a run started inside an existing tmux server still sees the simulator."""
     e = _sim_env()
-    keys = ("PATH", "SIM_DATA", "FAKE_ROOTLOG", "SIM_SCENARIO", "SIM_SLEEP", "SIM_GPU_BUSY")
+    keys = ("PATH", "SIM_DATA", "FAKE_ROOTLOG", "SIM_SCENARIO", "SIM_SLEEP", "SIM_GPU_BUSY", "SIM_BIOS")
     return "".join(f"export {k}={shlex.quote(e[k])}\n" for k in keys if k in e)
 
 
@@ -191,6 +191,7 @@ def _version_script(name: str) -> str:
         "echo \"GPU_MODEL=$(amd-smi static --asic 2>/dev/null | grep -m1 -i market_name | cut -d: -f2- | sed 's/^ *//' || echo unknown)\"; "
         "echo \"GPU_COUNT=$(amd-smi list 2>/dev/null | grep -c '^GPU' || echo unknown)\"; "
         "echo \"VBIOS=$(amd-smi static --vbios 2>/dev/null | grep -iE '^ *VERSION:' | awk '{print $2}' | sort -u | paste -sd, - || echo unknown)\"; "
+        'echo "BIOS=${SIM_BIOS:-$(cat /sys/class/dmi/id/bios_version 2>/dev/null || echo unknown)}"; '
         'echo "HOSTNAME=$(hostname)"'
     )
 
@@ -257,6 +258,14 @@ def _recipe_tests_md(name: str, recipe: str) -> str:
         return f"**Tests in `{recipe}`** (recipe file, no previous run here):\n```\n{r['raw'][:3000]}\n```"
     return (f"**Tests in `{recipe}`**: not known yet (no previous run on {name}, no recipe file found). "
             "AGFHC prints its test table when the run starts.")
+
+
+def _installed(name: str) -> dict:
+    """Recipes and tests the node's installed AGFHC defines (`agfhc --list`). Versions change with BKC and ROCm,
+    so this is read live; the template allowlist is a safety ceiling, not a version lock."""
+    a = _agfhc(name)
+    _, out, _ = _exec(name, a["sudo"] + a["list_cmd"].format(bin=shlex.quote(a["bin"])) + " 2>&1", timeout=60)
+    return L.parse_list(out)
 
 
 def _check_recipe(name: str, recipe: str, extra_args: str):
@@ -460,6 +469,10 @@ async def plan_run(node: str, recipe: str, extra_args: str = "", operator: str =
     if rc == 255:
         return f"ERROR: cannot reach {node}: {err.strip()[:300]}"
     versions = L.parse_kv(out)
+    installed = await asyncio.to_thread(_installed, node)
+    if installed["recipes"] and recipe not in installed["recipes"]:
+        return (f"REFUSED: the AGFHC installed on {node} ({installed['version'] or 'unknown version'}) does not define "
+                f"recipe '{recipe}'. Installed recipes: {', '.join(installed['recipes'])}")
     tests_md = await asyncio.to_thread(_recipe_tests_md, node, recipe)
     run_id = L.new_run_id(node, recipe)
     cmd = L.build_run_cmd(a["run_cmd"], a["bin"], recipe, f"{rr}/{run_id}", extra_args)

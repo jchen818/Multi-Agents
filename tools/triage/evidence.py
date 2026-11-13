@@ -15,6 +15,24 @@ SKIP = {"run.sh", "start_epoch", "end_epoch", "start_uptime", "rc", ".run_id", "
 MAX_FILE_BYTES = 4_000_000
 MIN_CITATION_CHARS = 12          # "FAIL" alone proves nothing
 
+# Collapse repetitive lines into distinct shapes (ported from the Log Analyzer tool v1.1.0).
+# Order matters: longest/most specific first.
+_NORMALIZERS = [
+    (re.compile(r"\b[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\b"), "<UUID>"),
+    (re.compile(r"\b\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}\S*"), "<TS>"),
+    (re.compile(r"\b\d{2}:\d{2}:\d{2}\b"), "<TIME>"),
+    (re.compile(r"\b0x[0-9a-fA-F]+\b"), "<HEX>"),
+    (re.compile(r"\b(?:\d{1,3}\.){3}\d{1,3}\b"), "<IP>"),
+    (re.compile(r"/[\w./\-]{6,}"), "<PATH>"),
+    (re.compile(r"\b\d+\b"), "<N>"),
+]
+
+
+def normalize(line: str) -> str:
+    for rx, repl in _NORMALIZERS:
+        line = rx.sub(repl, line)
+    return line.strip()
+
 
 def clean_lines(text: str) -> list:
     """Lines as a reader sees them: ANSI codes removed, carriage-return redraws split, trailing space trimmed."""
@@ -95,6 +113,22 @@ def grep(ev: Evidence, pattern: str, max_hits: int = 40, files: str = "") -> lis
                 if len(hits) >= max_hits:
                     return hits
     return hits
+
+
+def summarize_patterns(ev: Evidence, files: str = "", filter_pattern: str = "", top: int = 30) -> list:
+    """[(count, shape, first [file:line])] most frequent first: what a big log actually contains."""
+    rx = re.compile(filter_pattern, re.I) if filter_pattern else None
+    counts, first = {}, {}
+    for name in ev.doc_names():
+        if files and files not in name:
+            continue
+        for i, line in enumerate(ev.docs[name], 1):
+            if rx and not rx.search(line):
+                continue
+            key = normalize(line)[:300]
+            counts[key] = counts.get(key, 0) + 1
+            first.setdefault(key, f"{name}:{i}")
+    return [(n, k, first[k]) for k, n in sorted(counts.items(), key=lambda kv: -kv[1])[:top]]
 
 
 def verify_citations(ev: Evidence, citations: list) -> list:

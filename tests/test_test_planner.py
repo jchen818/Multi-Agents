@@ -38,7 +38,7 @@ class FakeModel:
         self.q = {Plan: list(plans), Replan: list(replans)}
         self.text, self.calls, self.prompts = text, {Plan: 0, Replan: 0}, []
 
-    def with_structured_output(self, schema, method=None):
+    def with_structured_output(self, schema, method=None, include_raw=False):
         outer = self
 
         class R:

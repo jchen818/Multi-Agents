@@ -19,6 +19,7 @@ from typing import Literal, Optional, TypedDict
 from pydantic import BaseModel, Field
 from langgraph.graph import StateGraph, START, END
 
+from core.structured import structured
 from tools.triage.evidence import (Evidence, evidence_markdown, grep, load_archive, summarize_patterns,
                                    verify_citations)
 
@@ -107,11 +108,12 @@ def build_graph(model, judge_model=None, bug_search=None, max_calls: int = MAX_L
     judge_model = judge_model or model
 
     async def ask(state, schema, user, m=None):
-        if state["calls"] >= max_calls:
-            raise RuntimeError("LLM call budget reached")
-        state["calls"] += 1
-        return await (m or model).with_structured_output(schema, method="function_calling").ainvoke(
-            [("system", SYSTEM), ("user", user)])
+        """Structured answer or None (see core/structured.py); every attempt counts against the call budget."""
+        def tick():
+            if state["calls"] >= max_calls:
+                return False
+            state["calls"] += 1
+        return await structured(m or model, schema, [("system", SYSTEM), ("user", user)], on_call=tick)
 
     def ev_of(state) -> Evidence:
         return load_archive(state["archive"])
@@ -126,6 +128,8 @@ def build_graph(model, judge_model=None, bug_search=None, max_calls: int = MAX_L
             terms = [f["test"].rsplit("-", 2)[0] for f in ev.failures] + [f["status"] or "" for f in ev.failures]
             q = " ".join(f"{f['test']} {f['status']} {' '.join(f['lines'][:2])}" for f in ev.failures) or ev.verdict
             hits = bug_search(q, 5, state.get("exclude_bugs") or [], terms)
+            strong = [h for h in hits if h.get("terms")]
+            hits = strong + [dict(h, summary="(weak, wording only) " + h.get("summary", "")) for h in hits if not h.get("terms")][:2]
             hist = "\n".join(f"- Bug {h['bug_id']} [{h.get('status')}/{h.get('resolution') or '-'}] {h.get('summary', '')} "
                              f"(terms: {', '.join(h.get('terms') or []) or '-'}): {h.get('text', '')[:500]}"
                              for h in hits) or "(no similar bugs)"
@@ -139,7 +143,9 @@ def build_graph(model, judge_model=None, bug_search=None, max_calls: int = MAX_L
                 "least one 'test tool/config defect' and one 'hardware' candidate. For each give 1-4 regexes to search "
                 "the logs.")
         out = await ask(state, Hypotheses, user)
-        hyps = [h.model_dump() for h in out.hypotheses][:6]
+        hyps = [h.model_dump() for h in (out.hypotheses if out else [])][:6]
+        if not hyps:
+            return {"candidates": [], "calls": state["calls"], "status": "NO_HYPOTHESES"}
         return {"candidates": [{"hyp": h, "depth": 1} for h in hyps], "calls": state["calls"]}
 
     async def score_one(state, c):
@@ -155,6 +161,9 @@ def build_graph(model, judge_model=None, bug_search=None, max_calls: int = MAX_L
                 "Cite supporting and contradicting lines copied exactly from <hits> or <evidence> (without the "
                 "[file:line] prefix, give the file separately). List matching past bug ids.")
         s = await ask(state, Score, user)
+        if s is None:
+            c.update(score=0.0, support=[], against=[], bugs=[], reasoning="model gave no structured score")
+            return c
         c.update(score=max(0.0, min(1.0, s.score)), support=_cites(s.support), against=_cites(s.against),
                  bugs=s.bugs, reasoning=s.reasoning)
         return c
@@ -173,7 +182,7 @@ def build_graph(model, judge_model=None, bug_search=None, max_calls: int = MAX_L
                     f"{c['hyp']['cause']}\nIts hits:\n" + "\n".join(c["grep_hits"][:20]) +
                     f"\n\n<evidence>\n{state['evidence'][:4000]}\n</evidence>\nReturn exactly one hypothesis.")
             out = await ask(state, Hypotheses, user)
-            if out.hypotheses:
+            if out and out.hypotheses:
                 h = out.hypotheses[0].model_dump()
                 h["category"] = c["hyp"]["category"]         # refinement may not jump category
                 expanded.append(await score_one(state, {"hyp": h, "depth": 2, "parent": c["hyp"]["cause"]}))
@@ -204,7 +213,9 @@ def build_graph(model, judge_model=None, bug_search=None, max_calls: int = MAX_L
             lines = "\n".join(f"[{x['where']}] {x['text']}" for x in c["support_v"])
             j = await ask(state, Judge, f"Cause: {c['hyp']['cause']}\nCited lines:\n{lines}\n\nDo these lines support "
                                         "the cause, or are they unrelated or too weak?", m=judge_model)
-            if j.supported:
+            if j is None:
+                judged.append(dict(c, judge="not judged (no structured answer)"))
+            elif j.supported:
                 judged.append(dict(c, judge=j.why))
             else:
                 dropped.append(dict(c, why=f"judge: {j.why}"))
@@ -239,12 +250,12 @@ def build_graph(model, judge_model=None, bug_search=None, max_calls: int = MAX_L
             d = await ask(state, BugDraft, "Write a bug draft for an engineer to review and file. Use only this triage "
                                            "report; label hypotheses as hypotheses; include versions and the exact "
                                            f"evidence lines.\n\n{text}")
-            draft = d.model_dump()
-            if state["calls"] < max_calls:
+            draft = d.model_dump() if d else {}
+            if draft and state["calls"] < max_calls:
                 cr = await ask(state, Critique, "Check this bug draft: repro steps or the command that ran, environment "
                                                 "versions, evidence lines quoted exactly, no speculation stated as fact."
                                                 f"\n\n{json.dumps(draft)}\n\nTriage report it must agree with:\n{text}")
-                draft["critique"] = cr.model_dump()
+                draft["critique"] = cr.model_dump() if cr else {"ok": False, "problems": ["critique gave no structured answer"]}
         return {"report": text, "draft": draft, "status": "DONE", "calls": state["calls"]}
 
     g = StateGraph(State)

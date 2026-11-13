@@ -26,7 +26,7 @@ class Fake:
     def __init__(self, judge_rejects=("thermal",)):
         self.prompts, self.judge_rejects = [], judge_rejects
 
-    def with_structured_output(self, schema, method=None):
+    def with_structured_output(self, schema, method=None, include_raw=False):
         outer = self
 
         class R:
@@ -107,3 +107,41 @@ def test_judge_can_reject_and_nothing_survives_without_evidence(archive):
 def test_llm_call_budget_is_enforced(archive):
     out = run(build_graph(Fake(), max_calls=12), archive)
     assert out["calls"] <= 12
+
+
+class RawFake(Fake):
+    """Returns LangChain's include_raw shape. For schemas in `text_only`, parsed=None and the JSON sits in the text
+    (or no JSON at all when json_in_text is False), like a local model that answered without calling the tool."""
+
+    def __init__(self, text_only=(), json_in_text=True, **kw):
+        super().__init__(**kw)
+        self.text_only, self.json_in_text = text_only, json_in_text
+
+    def with_structured_output(self, schema, method=None, include_raw=False):
+        outer = self
+
+        class R:
+            async def ainvoke(self, msgs):
+                from langchain_core.messages import AIMessage
+                u = msgs[-1][1] if "Answer only by calling" not in msgs[-1][1] else msgs[-3][1]
+                outer.prompts.append((schema.__name__, u))
+                obj = outer.answer(schema, u)
+                if schema.__name__ in outer.text_only:
+                    body = f"Here you go:\n```json\n{obj.model_dump_json()}\n```" if outer.json_in_text else "I think it is HBM."
+                    return {"parsed": None, "raw": AIMessage(content=body)}
+                return {"parsed": obj, "raw": AIMessage(content="")}
+        return R()
+
+
+def test_text_reply_with_json_is_parsed(archive):
+    out = run(build_graph(RawFake(text_only=("Score",))), archive)
+    assert out["ranked"] and out["ranked"][0]["score"] == 0.8
+
+
+def test_no_structured_answer_does_not_crash(archive):
+    m = RawFake(text_only=("Score",), json_in_text=False)
+    out = run(build_graph(m), archive)
+    assert out["status"] == "DONE" and out["ranked"] == []
+    assert all(c["why"] == "no supporting log line" for c in out["dropped"])
+    assert sum(1 for s, _ in m.prompts if s == "Score") == 2 * 8      # one retry per score, 5 + 3 refined
+    assert "No hypothesis survived verification" in out["report"]

@@ -49,6 +49,10 @@ class EpisodeStore:
     def confirm(self, archive: Path, category: str, cause: str, evidence: str = "", note: str = "",
                 by: str = "", triage_dir: Path = None) -> dict:
         from agents.triage.graph import CATEGORIES
+        for name, val in (("cause", cause), ("evidence", evidence), ("note", note)):
+            if re.search(r"<[^<>]{2,}>", val or "") or (name == "cause" and len((val or "").strip()) < 8):
+                raise ValueError(f"--{name} looks like a placeholder or is too short: {val!r}. "
+                                 "Write the real confirmed cause; an episode is training data for triage.")
         if category not in CATEGORIES:
             raise ValueError(f"category must be one of: {', '.join(CATEGORIES)}")
         archive = Path(archive)
@@ -146,7 +150,10 @@ def main():
     sub.add_parser("pending")
     args = ap.parse_args()
     if args.cmd == "confirm":
-        ep = EpisodeStore(memory=_memory()).confirm(Path(args.archive), args.category, args.cause, args.evidence, args.note)
+        try:
+            ep = EpisodeStore(memory=_memory()).confirm(Path(args.archive), args.category, args.cause, args.evidence, args.note)
+        except ValueError as e:
+            raise SystemExit(f"not saved: {e}")
         print(EpisodeStore.text(ep))
         print(f"saved {EpisodeStore().path(ep['archive'])}" + (f" (index error: {ep['index_error']})" if ep.get("index_error") else ""))
     elif args.cmd == "list":

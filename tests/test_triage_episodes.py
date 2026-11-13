@@ -74,3 +74,11 @@ def test_pending_lists_unconfirmed_fail_archives(archive, tmp_path):
     assert pending(archive.parent, st) == [(archive.name, False)]
     st.confirm(archive, "hardware", "x", triage_dir=tmp_path / "none")
     assert pending(archive.parent, st) == []
+
+
+def test_placeholders_are_refused(archive, tmp_path):
+    st = EpisodeStore(tmp_path / "eps")
+    for kw in ({"cause": "<what it was>"}, {"cause": "HBM held by vLLM", "evidence": "<the log line>"}, {"cause": "x"}):
+        with pytest.raises(ValueError):
+            st.confirm(archive, "environment/node state", triage_dir=tmp_path / "none", **kw)
+    assert not st.path(archive.name).exists()

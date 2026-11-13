@@ -4,7 +4,8 @@
 # Durations are AGFHC's own recipe titles ("~5m", "~1h"); recipes without one show "unknown" and the planner
 # reads the real test list (list_recipe_tests) before asking for approval.
 platform: mi325x
-target_stack: {rocm: "7.2.1", agfhc: "1.30.2", bkc: "25.06.08"}
+# No target stack is pinned here: AGFHC, ROCm, amdgpu and BKC/BIOS change together and are read live at preflight,
+# shown in the plan and recorded with every run and recipe.
 
 agfhc:
   bin: /opt/amd/agfhc/agfhc
@@ -92,7 +93,9 @@ tiers:
       - {name: hbm_burnin_8h, duration: ~8h}
       - {name: hbm_burnin_24h, duration: ~24h}
 
-# Allowlist = every recipe AGFHC 1.30.2 defines for mi325x. Anything else is refused.
+# Allowlist = the recipes the agents may run (a safety ceiling). plan_run also refuses a recipe the node's installed
+# AGFHC does not define (live `agfhc --list`), so a version change can only narrow this, never widen it.
+# Taken from AGFHC 1.30.2; after an upgrade that adds recipes, add them here deliberately.
 allowed_recipes: [
   acf_lvl1, acf_lvl2, acf_lvl3, acf_lvl4,
   all_burnin_12h, all_burnin_24h, all_burnin_4h,

@@ -46,7 +46,7 @@ async def _run(v: dict) -> dict:
     seed_id = ""
     if v.get("seed"):
         steps = [s for s in v.get("seed_steps", "all_lvl1").split("|")]
-        rec = store.save(platform="mi325x", bkc="25.06.08", requirements=v["seed"], node="sim", dryrun=True,
+        rec = store.save(platform="mi325x", bkc="SIM-BIOS-1.0", requirements=v["seed"], node="sim", dryrun=True,
                          plan={"tier": v.get("seed_tier", "smoke"), "steps": [{"recipe": s, "reason": "seed"} for s in steps]},
                          results=[{"recipe": s, "run_id": "seed", "verdict": "PASS"} for s in steps], versions={})
         seed_id = rec["id"]

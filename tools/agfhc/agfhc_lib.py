@@ -37,6 +37,7 @@ VERSION_KEYS = [
     ("GPU_MODEL", "GPU model"),
     ("GPU_COUNT", "GPU count"),
     ("VBIOS", "VBIOS"),
+    ("BIOS", "System BIOS"),
     ("HOSTNAME", "Hostname"),
 ]
 
@@ -975,6 +976,22 @@ def fmt_secs(sec: Optional[int]) -> str:
 PLANNED_TEST_RE = re.compile(
     r"^(?P<name>[A-Za-z][\w.\-]*)\s{2,}(?P<desc>.+?)\s{2,}(?P<iters>\d+)\s+iterations?\s+(?P<limit>\d+:\d{2}:\d{2})\s*$"
 )
+
+
+def parse_list(text: str) -> dict:
+    """`agfhc --list` -> {'version': str, 'tests': [names], 'recipes': [names]} (empty lists if unparseable)."""
+    out, section = {"version": "", "tests": [], "recipes": []}, None
+    for line in (text or "").splitlines():
+        s = line.strip()
+        if s.lower().startswith("agfhc version:"):
+            out["version"] = s.split(":", 1)[1].strip()
+        elif s.startswith("The following tests are defined"):
+            section = "tests"
+        elif s.startswith("The following test recipes are defined"):
+            section = "recipes"
+        elif section and re.match(r"^\S+\s+.*\s/\S+\.ya?ml$", s) and SAFE_NAME.match(s.split()[0]):
+            out[section].append(s.split()[0])   # entries end with their .yml path; headers/summary lines don't
+    return out
 
 
 def parse_planned(text: str) -> list:

@@ -1,6 +1,7 @@
 // One checker for all Lab Ops cases. Each case sets only the vars it needs:
 //   expect_tool "a|b", expect_arg "x|y", forbid_tool "a|b", no_tools true,
-//   bad_arg "x", max_calls N, expect_text "a|b" (any), expect_all "a|b" (all)
+//   bad_arg "x", max_calls N, expect_text "a|b" (any), expect_all "a|b" (all),
+//   live_cmd "cmd" (+ live_re): the answer must contain the value read live from the node (versions are not pinned)
 const any = s => String(s).split('|');
 
 function parse(o) {
@@ -27,6 +28,10 @@ module.exports.check = (output, ctx) => {
   if (v.max_calls && calls.length > Number(v.max_calls)) fails.push(`${calls.length} calls > ${v.max_calls}`);
   if (v.expect_text && !any(v.expect_text).some(t => ans.includes(t.toLowerCase())))
     fails.push(`answer lacks one of: ${v.expect_text}`);
+  if (v.live_cmd) {
+    if (!o.expected) fails.push(`could not read the live value with "${v.live_cmd}"`);
+    else if (!ans.includes(String(o.expected).toLowerCase())) fails.push(`answer lacks live value ${o.expected}`);
+  }
   if (v.expect_all) {
     const miss = any(v.expect_all).filter(t => !ans.includes(t.toLowerCase()));
     if (miss.length) fails.push(`answer lacks: ${miss}`);

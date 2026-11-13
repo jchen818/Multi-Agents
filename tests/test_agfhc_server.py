@@ -111,3 +111,20 @@ def test_token_single_use_and_kill_switch(srv, monkeypatch, tmp_path):
     assert first.startswith("STARTED"), first
     assert "unknown, used or expired" in run(srv.start_run(t))
     wait_finished(srv, re.search(r"run_id=`([^`]+)`", first).group(1))
+
+
+def test_recipe_missing_from_installed_agfhc_is_refused(srv, monkeypatch, tmp_path):
+    import shutil
+    data = tmp_path / "simdata"
+    shutil.copytree(REPO / "sim" / "data", data)
+    lst = data / "list.txt"
+    lst.write_text("\n".join(l for l in lst.read_text().splitlines() if not l.startswith("all_lvl2 ")))
+    monkeypatch.setenv("SIM_DATA", str(data))
+    out = run(srv.plan_run("sim", "all_lvl2"))
+    assert out.startswith("REFUSED") and "does not define recipe 'all_lvl2'" in out and "1.30.2" in out
+    assert "Planned AGFHC run" in run(srv.plan_run("sim", "all_lvl1"))
+
+
+def test_versions_include_bios(srv):
+    out = run(srv.preflight("sim"))
+    assert "| System BIOS | SIM-BIOS-1.0 |" in out

@@ -180,7 +180,7 @@ def test_executed_plan_is_saved_and_reused(env, monkeypatch):
     out, _ = drive(g, {"requirements": "check HBM and XGMI after BKC update", "node": "sim"}, [{"action": "approve"}])
     (f,) = recipe_files(env["store"])
     rec = yaml.safe_load(f.read_text())
-    assert rec["dryrun"] and rec["platform"] == "mi325x" and rec["bkc"] == "25.06.08"
+    assert rec["dryrun"] and rec["platform"] == "mi325x" and rec["bkc"] == "SIM-BIOS-1.0"
     assert [s["recipe"] for s in rec["steps"]] == ["hbm_lvl1", "xgmi_lvl1"]
     assert [o["verdict"] for o in rec["outcome"]] == ["PASS", "PASS"] and rec["versions"].get("ROCm") == "7.2.1"
     assert "Recipe saved" in out["report"] and out["recipe_saved"] == str(f)

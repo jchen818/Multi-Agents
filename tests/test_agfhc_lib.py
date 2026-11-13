@@ -4,6 +4,7 @@ The end-to-end, register_dut, tmux and Open WebUI exposure checks of the origina
 (tools/agfhc/server.py) and its dry-run tests, not to the pure helpers.
 """
 import json
+from pathlib import Path
 import os
 import shlex
 import shutil
@@ -358,3 +359,11 @@ def test_misc_pure_helpers():
     check(T.redact("pw=abc123", "abc123") == "pw=******", "redact")
     rid = "20261112T174708Z-mi325x-1-all-lvl1-ab58"
     check(T.tmux_session_name(rid) == "agfhc-174708-ab58", f"tmux session name: {T.tmux_session_name(rid)}")
+
+
+def test_parse_list_real_output():
+    out = T.parse_list((Path(__file__).resolve().parents[1] / "sim/data/list.txt").read_text())
+    check(out["version"] == "1.30.2", f"version {out['version']}")
+    check(len(out["tests"]) == 30 and "hbm_s16_ds" in out["tests"], f"tests {len(out['tests'])}")
+    check(len(out["recipes"]) == 40 and "all_lvl1" in out["recipes"] and "Name" not in out["recipes"], f"recipes {len(out['recipes'])}")
+    check(T.parse_list("garbage") == {"version": "", "tests": [], "recipes": []}, "unparseable -> empty")

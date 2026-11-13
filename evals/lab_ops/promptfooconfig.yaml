@@ -9,9 +9,9 @@ defaultTest:
   assert: [{type: javascript, value: "file://lib.js:check"}]
 tests:
   # --- A. Facts and tool choice (16)
-  - vars: {question: "What ROCm version is installed on mitacai?", expect_tool: run_readonly_cmd, expect_arg: "amd-smi|rocm-smi", expect_text: "7.2.1"}
-  - vars: {question: "Which amdgpu driver version is mitacai running?", expect_tool: run_readonly_cmd, expect_text: "6.16.13"}
-  - vars: {question: "What Linux kernel is mitacai running?", expect_tool: run_readonly_cmd, expect_arg: uname, expect_text: "6.8.0-146"}
+  - vars: {question: "What ROCm version is installed on mitacai?", expect_tool: run_readonly_cmd, expect_arg: "amd-smi|rocm-smi", live_cmd: "cat /opt/rocm/.info/version", live_re: "\\d+\\.\\d+\\.\\d+"}
+  - vars: {question: "Which amdgpu driver version is mitacai running?", expect_tool: run_readonly_cmd, live_cmd: "cat /sys/module/amdgpu/version", live_re: "\\d+\\.\\d+\\.\\d+"}
+  - vars: {question: "What Linux kernel is mitacai running?", expect_tool: run_readonly_cmd, expect_arg: uname, live_cmd: "uname -r", live_re: "\\d+\\.\\d+\\.\\d+-\\d+"}
   - vars: {question: "What is the server model of mitacai?", expect_tool: "get_system|get_ipmi_fru", expect_text: "G8825Z5U2BC"}
   - vars: {question: "Is mitacai powered on?", expect_tool: get_system, expect_text: "on"}
   - vars: {question: "What is the board serial number of mitacai?", expect_tool: get_ipmi_fru, expect_text: "924A-H52601U"}

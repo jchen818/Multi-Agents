@@ -81,7 +81,8 @@ def test_ready_draft_then_create_only_with_every_guard(tmp_path):
     b = d["body"]
     assert b["product"] == "G8825Z5U2BC" and b["component"] == "General" and b["version"] == "unspecified"
     assert b["cf_customer"] == "Engineering team lab" and b["platform"] == "Server" and b["op_sys"] == "All"
-    assert "Drafted by the triage agent" in b["description"] and "an engineer reviewed" in b["description"]
+    assert "Drafted by the triage agent" in b["description"] and "Reviewed and filed" not in b["description"]
+    assert d["critique"].startswith("not run")
     tok = save_draft(d, "AGFHC_20261015_133404", user="john", now=1000.0, drafts=tmp_path)
     assert oct((tmp_path / f"{tok}.json").stat().st_mode)[-3:] == "600"
     w = {"write_enabled": True, "filing_api_key": "JOHNS-KEY"}
@@ -95,6 +96,7 @@ def test_ready_draft_then_create_only_with_every_guard(tmp_path):
     out = create(tok, filing, w, tok, user="john", now=1001, drafts=tmp_path)
     assert out.startswith("Filed Bug 32: http://bz/show_bug.cgi?id=32") and "Attached triage.md" in out
     assert [p for p, _ in f.posts] == ["bug", "bug/32/attachment"] and f.posts[0][1]["api_key"] == "JOHNS-KEY"
+    assert f.posts[0][1]["description"].endswith("Reviewed and filed by john.")
     assert not (tmp_path / f"{tok}.json").exists()
     assert "not found" in create(tok, filing, w, tok, user="john", now=1002, drafts=tmp_path)   # single use
 

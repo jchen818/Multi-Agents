@@ -224,12 +224,16 @@ def build_draft(bz: Bugzilla, triage: dict, summary_json: dict, cfg: dict, produ
     elif len(summary) > 255:
         out["invalid"].append(f"Summary is {len(summary)} characters; the limit is 255.")
     note = ("\n\n---\nDrafted by the triage agent from archive " + str(summary_json.get("run_id")) +
-            ". Causes above are hypotheses ranked from verified log lines; an engineer reviewed this draft before filing.")
+            ". Causes above are hypotheses ranked from verified log lines.")
     body["summary"], body["description"] = summary, description + note if description else ""
     if attach_report and len(attach_report.encode()) <= MAX_ATTACHMENT:
         import base64
         out["attachment"] = {"file_name": "triage.md", "content_type": "text/plain", "summary": "Triage report",
                              "data": base64.b64encode(attach_report.encode()).decode()}
+    cr = d.get("critique") or {}
+    out["critique"] = ("revised once for: " + "; ".join(d["revised_for"]) if d.get("revised_for") else
+                       "ok" if cr.get("ok") else ("UNRESOLVED: " + "; ".join(cr.get("problems") or ["no critique"]) if cr
+                                                  else "not run (draft from an older triage run; rerun triage)"))
     out.update(body=body, preview=preview, ready=not out["missing"] and not out["invalid"])
     return out
 
@@ -247,7 +251,8 @@ def save_draft(draft: dict, archive: str, user: str = None, now: float = None, d
     token = secrets.token_hex(4)
     p = drafts / f"{token}.json"
     p.write_text(json.dumps({"user": user or getpass.getuser(), "archive": archive, "expires": now + DRAFT_TTL_S,
-                             "body": draft["body"], "attachment": draft.get("attachment"), "preview": draft["preview"]}))
+                             "body": draft["body"], "attachment": draft.get("attachment"), "preview": draft["preview"],
+                             "critique": draft.get("critique", "")}))
     os.chmod(p, 0o600)
     return token
 
@@ -269,6 +274,7 @@ def create(token: str, bz: Bugzilla, cfg: dict, confirm: str, user: str = None, 
         return "ERROR: this draft belongs to a different user."
     if (confirm or "").strip() != token.strip():
         return "NOT FILED: confirmation did not match the token."
+    d["body"]["description"] += f"\nReviewed and filed by {d['user']}."
     try:
         bug_id = bz.post("bug", d["body"]).get("id")
     except Exception as e:
@@ -288,6 +294,7 @@ def preview_text(token: str, d: dict, similar: list) -> str:
     lines = [f"DRAFT READY. token={token} (valid {DRAFT_TTL_S // 60} min). Nothing has been filed.", ""]
     lines += [f"{k}: {v}" for k, v in d["preview"]]
     lines += [f"Summary: {d['body']['summary']}", "Description:", d["body"]["description"]]
+    lines.append(f"\nSelf-critique: {d.get('critique') or 'unknown'}")
     if d.get("attachment"):
         lines.append("Attachment: triage.md (the full triage report)")
     lines += ["", "Similar existing bugs (from the last export):"]
@@ -331,8 +338,10 @@ def main():
             raise SystemExit(2)
         try:
             from tools.triage.bug_index import OpenAIEmbedder, hybrid_search, qdrant
-            q = dr["body"]["summary"] + " " + dr["body"]["description"][:1500]
-            similar = hybrid_search(qdrant(), OpenAIEmbedder(), q, 5)
+            s_json = json.loads((archive / "summary.json").read_text())
+            q = dr["body"]["summary"] + " " + " ".join(s_json.get("failed") or [])
+            similar = hybrid_search(qdrant(), OpenAIEmbedder(), q, 5,
+                                    extra_terms=[t.rsplit("-", 2)[0] for t in s_json.get("failed") or []])
         except Exception:
             similar = []
         token = save_draft(dr, archive.name)

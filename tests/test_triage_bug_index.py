@@ -89,3 +89,19 @@ def test_hybrid_ranks_exact_terms_first(store, tmp_path):
     hits = hybrid_search(client, fake_embed, "hbm_ds_ntd failed", k=3, bugs_file=f)
     assert hits[0]["bug_id"] == 22 and "hbm_ds_ntd" in hits[0]["terms"]
     assert 22 not in [h["bug_id"] for h in hybrid_search(client, fake_embed, "hbm_ds_ntd", exclude_bugs=[22], bugs_file=f)]
+
+
+def test_common_terms_do_not_count(tmp_path):
+    from tools.triage.bug_index import build, hybrid_search
+    bugs = [{"id": i, "summary": f"rocm agfhc issue {i}", "product": "P", "component": "C", "status": "RESOLVED",
+             "resolution": "FIXED", "custom": {}, "comments": [{"count": 0, "time": "t", "text": "rocm-7.2.1 seen"}],
+             "attachments": []} for i in range(1, 13)]
+    bugs.append({"id": 99, "summary": "hbm_s16_ds allocation failure", "product": "P", "component": "C",
+                 "status": "RESOLVED", "resolution": "FIXED", "custom": {}, "comments": [], "attachments": []})
+    f = tmp_path / "bugs.jsonl"
+    f.write_text("\n".join(json.dumps(b) for b in bugs))
+    c = qdrant_client.QdrantClient(":memory:")
+    build(c, fake_embed, f, log=lambda *_: None)
+    hits = hybrid_search(c, fake_embed, "hbm_s16_ds failed on rocm-7.2.1", k=13, bugs_file=f)
+    assert all("rocm-7.2.1" not in h["terms"] for h in hits)            # in 12 of 13 bugs: not a signal
+    assert next(h for h in hits if h["bug_id"] == 99)["terms"] == ["hbm_s16_ds"]

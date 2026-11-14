@@ -154,6 +154,9 @@ def hybrid_search(client, embed, query: str, k: int = 5, exclude_bugs=(), bugs_f
         for line in open(bugs_file):
             b = json.loads(line)
             texts[b["id"]] = (b.get("summary", "") + " " + " ".join(c["text"] for c in b.get("comments") or [])).lower()
+    if texts:                       # a term in a quarter or more of all bugs (rocm, agfhc, the GPU model) is noise
+        cap = max(3, len(texts) // 4)
+        terms = [t for t in terms if sum(t in x for x in texts.values()) <= cap]
     sem = {h["bug_id"]: h for h in search(client, embed, query, k=max(k * 4, 20), exclude_bugs=exclude_bugs,
                                           collection=collection)}
     for bid, text in texts.items():          # bugs that name a term but were not in the semantic top

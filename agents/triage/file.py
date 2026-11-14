@@ -338,10 +338,11 @@ def main():
             raise SystemExit(2)
         try:
             from tools.triage.bug_index import OpenAIEmbedder, hybrid_search, qdrant
-            s_json = json.loads((archive / "summary.json").read_text())
-            q = dr["body"]["summary"] + " " + " ".join(s_json.get("failed") or [])
+            from tools.triage.evidence import load_archive
+            fails = load_archive(archive).failures            # test names AND status codes (TEST_HBM_STRESS_FAIL)
+            q = dr["body"]["summary"] + " " + " ".join(f"{f['test']} {f['status']}" for f in fails)
             similar = hybrid_search(qdrant(), OpenAIEmbedder(), q, 5,
-                                    extra_terms=[t.rsplit("-", 2)[0] for t in s_json.get("failed") or []])
+                                    extra_terms=[f["test"].rsplit("-", 2)[0] for f in fails] + [f["status"] or "" for f in fails])
         except Exception:
             similar = []
         token = save_draft(dr, archive.name)

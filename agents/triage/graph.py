@@ -200,7 +200,8 @@ def build_graph(model, judge_model=None, bug_search=None, max_calls: int = MAX_L
                 f"{state['patterns']}\n\n<history>\n{state['history']}\n</history>\n\n"
                 f"{CATEGORY_HELP}\n\nPropose 5 candidate root causes across different categories ({', '.join(CATEGORIES)}). Include at "
                 "least one 'test tool/config defect', one 'hardware' and one 'environment/node state' candidate (were the "
-                "GPUs free when the test started?). For each give 1-4 regexes to search the logs.")
+                "GPUs free when the test started?). Name GPUs exactly as the evidence does (e.g. GPU-05); never invent a "
+                "GPU number. For each give 1-4 regexes to search the logs.")
         out = await ask(state, Hypotheses, user)
         hyps = [h.model_dump() for h in (out.hypotheses if out else [])][:6]
         if not hyps:

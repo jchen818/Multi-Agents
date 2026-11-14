@@ -1,0 +1,10 @@
+# Bugzilla filing defaults for triage drafts (agents/triage/file.py). Secrets live in secrets/bugzilla.yaml:
+#   url, api_key (read-only, used for export and validation), filing_api_key (your own key), write_enabled (default false)
+url: http://10.46.252.48
+# Product for a draft when --product is not given, by the archive's host (as in summary.json)
+product_by_host:
+  mitacai: G8825Z5U2BC
+  10.46.252.115: G8825Z5U2BC
+default_product: ""
+product_aliases: {}
+defaults: {hardware: Server, os: All}

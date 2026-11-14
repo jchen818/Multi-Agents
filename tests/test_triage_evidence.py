@@ -144,3 +144,24 @@ def test_bz_export_is_read_only_and_complete(tmp_path):
     assert all(p["api_key"] == "KEY" for _, p in sess.calls)  # key in the query string
     s = stats(tmp_path)
     assert "2 bugs, 3 comments" in s and "GPU-related" in s and "#7" in s and "#8" not in s.split("GPU-related")[1]
+
+
+def test_nested_results_json_and_summary_fallback(tmp_path):
+    import json as _j
+    from tools.triage.evidence import load_archive
+    d = tmp_path / "AGFHC_X"
+    (d / "logs" / "agfhc_logs" / "agfhc_1").mkdir(parents=True)
+    nested = {"summary": {"total_selected_tests": 6, "total_failed": 1},
+              "suites": [{"name": "all_lvl1", "instances": {"items": [
+                  {"test": "pcie_link_status", "run": 1, "iteration": 1, "state": "passed"},
+                  {"test": "hbm_s16_ds", "run": 1, "iteration": 1, "state": "failed",
+                   "primary_status_name": "TEST_HBM_STRESS_FAIL", "primary_action_subject": "GPU-05",
+                   "extended_results": [{"test": ["FATL| ABORT: R1 GPU-00 failed to allocate buffer."]}]}]}}]}
+    (d / "logs" / "agfhc_logs" / "agfhc_1" / "results.json").write_text(_j.dumps(nested))
+    (d / "summary.json").write_text(_j.dumps({"verdict": "FAIL", "failed": ["hbm_s16_ds-1-1"]}))
+    (f,) = load_archive(d).failures
+    assert f == {"test": "hbm_s16_ds-1-1", "status": "TEST_HBM_STRESS_FAIL", "subject": "GPU-05",
+                 "lines": ["FATL| ABORT: R1 GPU-00 failed to allocate buffer."]}
+    (d / "logs" / "agfhc_logs" / "agfhc_1" / "results.json").unlink()      # no results.json: use summary.json
+    (f,) = load_archive(d).failures
+    assert f["test"] == "hbm_s16_ds-1-1"

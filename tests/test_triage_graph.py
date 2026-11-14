@@ -159,7 +159,7 @@ def test_summary_quote_is_removed_not_fatal_and_duplicates_collapse(archive):
     assert tool and tool[0]["removed_citations"] == ["New kernel messages during the run: none"]
     causes = [c["hyp"]["cause"] for c in out["ranked"]]
     assert "HBM stack fault on GPU-05" not in causes and any(c.startswith("refined") for c in causes)
-    assert any(c["why"].startswith("duplicate of: refined") for c in out["dropped"])
+    assert any(c["why"].startswith("same category as: refined") for c in out["dropped"])
 
 
 def test_prompts_ask_for_node_state_and_mark_old_lines():
@@ -233,3 +233,9 @@ def test_categories_are_defined_for_the_model(archive):
     m = Fake()
     run(build_graph(m), archive)
     assert CATEGORY_HELP in next(u for s, u in m.prompts if s == "Hypotheses")
+
+
+def test_one_candidate_per_category_in_the_ranking(archive):
+    out = run(build_graph(Fake()), archive)
+    cats = [c["hyp"]["category"] for c in out["ranked"]]
+    assert len(cats) == len(set(cats))

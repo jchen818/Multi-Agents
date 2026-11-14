@@ -127,13 +127,46 @@ def load_archive(path) -> Evidence:
                 rj = json.loads("\n".join(lines))
             except json.JSONDecodeError:
                 continue
-            for r in rj.get("results", []):
-                if r.get("state") not in ("passed", "skipped"):
-                    ext = [l for e in r.get("extended_results") or [] for l in (e.get("test") or [])]
-                    failures.append({"test": f"{r.get('test')}-{r.get('run', 1)}-{r.get('iteration', 1)}",
-                                     "status": r.get("primary_status_name"), "subject": r.get("primary_action_subject"),
-                                     "lines": ext[:20]})
+            failures += _failed_instances(rj)
+    if not failures:                     # fall back to what the agfhc server recorded at analyze time
+        det = summary.get("test_details") or {}
+        failures = [{"test": t, "status": (det.get(t) or {}).get("status") if isinstance(det.get(t), dict) else None,
+                     "subject": None, "lines": []} for t in summary.get("failed") or []]
+    seen = set()
+    failures = [f for f in failures if not (f["test"] in seen or seen.add(f["test"]))]
     return Evidence(root=root, summary=summary, docs=docs, failures=failures)
+
+
+def _failed_instances(data) -> list:
+    """Failing test instances anywhere in AGFHC's results.json. Like agfhc_lib.results_json_tests, walk the tree for
+    dicts with a string 'test' and 'state' instead of assuming where they sit (the real 1.30.2 file nests them)."""
+    out = []
+
+    def lines_of(o) -> list:
+        got = []
+        for e in o.get("extended_results") or []:
+            if isinstance(e, dict):
+                got += [l for l in (e.get("test") or []) if isinstance(l, str)]
+        return got
+
+    def walk(o):
+        if isinstance(o, dict):
+            if isinstance(o.get("test"), str) and isinstance(o.get("state"), str):
+                if o["state"].lower() not in ("passed", "pass", "skipped", "skip"):
+                    name = o["test"]
+                    if o.get("run") is not None and o.get("iteration") is not None:
+                        name = f"{name}-{o['run']}-{o['iteration']}"
+                    out.append({"test": name, "status": o.get("primary_status_name") or o.get("status"),
+                                "subject": o.get("primary_action_subject") or o.get("action_subject"),
+                                "lines": lines_of(o)[:20]})
+                return
+            for v in o.values():
+                walk(v)
+        elif isinstance(o, list):
+            for v in o:
+                walk(v)
+    walk(data)
+    return out
 
 
 def grep(ev: Evidence, pattern: str, max_hits: int = 40, files: str = "") -> list:

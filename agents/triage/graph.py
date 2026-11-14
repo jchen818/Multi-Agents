@@ -307,10 +307,10 @@ def build_graph(model, judge_model=None, bug_search=None, max_calls: int = MAX_L
             else:
                 dropped.append(dict(c, why=f"judge: {j.why}"))
         ranked = []
-        for c in judged:                    # duplicates collapse only among candidates that survived the judge
-            dup = next((k for k in ranked if _same(k, c)), None)
+        for c in sorted(judged, key=lambda c: -c["score"]):   # one explanation per category: the best-scored one
+            dup = next((k for k in ranked if _same(k, c) or k["hyp"]["category"] == c["hyp"]["category"]), None)
             if dup:
-                dropped.append(dict(c, why=f"duplicate of: {dup['hyp']['cause'][:80]}"))
+                dropped.append(dict(c, why=f"same category as: {dup['hyp']['cause'][:80]}"))
             else:
                 ranked.append(c)
         return {"ranked": ranked, "dropped": dropped, "calls": state["calls"]}

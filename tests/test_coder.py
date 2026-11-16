@@ -90,7 +90,8 @@ def diff_of(mini, files: dict) -> str:
 
 def run_checks(mini, files):
     ws = Workspace(mini, CFG)
-    return checks.check(diff_of(mini, files), CFG, (mini / "gpuval/commands.py").read_text(), ws.protected)
+    return checks.check(diff_of(mini, files), CFG, (mini / "gpuval/commands.py").read_text(), ws.protected,
+                        versions=ws.versions)
 
 
 @pytest.mark.parametrize("files,expect", [
@@ -105,6 +106,8 @@ def run_checks(mini, files):
     ({"tests/test_basic.py": "def test_basic():\n    pass\n"}, "assert(s) removed"),
     ({"config/platforms/mi325x.yaml": "name: mi325x\ngpu_count: 4\n"}, "existing expectation changed"),
     ({"config/platforms/mi325x.yaml": "name: mi325x\ngpu_count: 8\nvram_mb: 262128\n"}, None),
+    ({"config/platforms/mi325x.yaml": "# reformatted\nname:   mi325x\nvram_mb: 262128\ngpu_count: 8\n"}, None),
+    ({"config/platforms/mi325x.yaml": "name: mi325x\nvram_mb: 262128\n"}, "gpu_count removed"),
     ({"recordings/r1/out/gpu_count.txt": "7\n"}, "protected path"),
     ({"conftest.py": "x = 1\n"}, "protected path"),
 ])
@@ -309,6 +312,14 @@ def test_existing_test_cannot_be_declared_a_finding(mini):
     s = run_graph(mini, PLAN, [broken])
     assert s["outcome"] == "gave_up"
     assert any("only a NEW test" in p for p in s["report"]["problems"])
+
+
+def test_critique_cannot_loop_forever(mini):
+    s = run_graph(mini, PLAN, [GOOD], critiques=[Critique(ok=False, violations=["style nit"])])
+    assert s["outcome"] == "ready" and s["iteration"] == 2      # max_iterations is 2 in these tests
+    assert s["critique"]["unresolved"] == ["style nit"]
+    assert "did not resolve" in pr_text(s, CFG)[1]
+    assert [h["stage"] for h in s["history"]] == ["critique"]
 
 
 def test_critique_sends_it_back(mini):

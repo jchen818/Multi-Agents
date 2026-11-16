@@ -106,6 +106,12 @@ class Workspace:
         p.write_text(content if content.endswith("\n") else content + "\n")
         return f"wrote {r} ({len(content.splitlines())} lines)"
 
+    def versions(self, rel: str) -> tuple:
+        """(text at the base commit, text now) of one file; '' when it does not exist."""
+        r = subprocess.run(["git", "-C", str(self.root), "show", f"HEAD:{rel}"], capture_output=True, text=True)
+        p = self.root / rel
+        return (r.stdout if r.returncode == 0 else ""), (p.read_text() if p.exists() else "")
+
     def git_diff(self) -> str:
         """The change so far, against the base branch (new files included)."""
         return diff(self.root)

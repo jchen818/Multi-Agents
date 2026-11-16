@@ -91,6 +91,8 @@ class State(TypedDict, total=False):
     report: dict
     findings: dict
     critique: dict
+    history: list         # per round: {"round", "stage", "problems"} - why each round was sent back
+    critique_rounds: int
     outcome: str          # ready | refused | gave_up | stopped
     reason: str
     calls: int
@@ -141,7 +143,7 @@ def build_graph(model, ws: Workspace, cfg: dict, agent_factory=None):
             return {"outcome": "stopped", "reason": "kill switch is set"}
         problems = []
         d = diff(ws.root)
-        rep = checks.check(d, cfg, ws.read_file("gpuval/commands.py"), ws.protected)
+        rep = checks.check(d, cfg, ws.read_file("gpuval/commands.py"), ws.protected, versions=ws.versions)
         problems += rep.problems
         if d.strip() == "(no changes)":
             problems.append("no files were changed")
@@ -165,7 +167,10 @@ def build_graph(model, ws: Workspace, cfg: dict, agent_factory=None):
                     problems.append(f"{t}: no catch test in {CATCH_FILE} proves it fails on wrong data")
         elif not problems:
             problems.append("no new test_ function was added")
-        return {"tests": {"rc": tests["rc"], "failed": failed, "tail": tests["output"][-3000:]},
+        hist = list(state.get("history", []))
+        if problems:
+            hist.append({"round": state.get("iteration"), "stage": "verify", "problems": problems})
+        return {"history": hist, "tests": {"rc": tests["rc"], "failed": failed, "tail": tests["output"][-3000:]},
                 "report": {"problems": problems, "new_commands": rep.new_commands, "new_tests": rep.new_tests,
                            "files": rep.files},
                 "findings": findings, "feedback": problems}
@@ -182,8 +187,17 @@ def build_graph(model, ws: Workspace, cfg: dict, agent_factory=None):
                      "assertions, a test that does not read the recorded data). ok=true when there are none.")])
         if c is None:
             return {"critique": {"ok": True, "violations": [], "note": "no critique from the model"}, "feedback": []}
-        v = [] if c.ok else list(c.violations)
-        return {"critique": c.model_dump(), "feedback": [f"review: {x}" for x in v]}
+        v = [] if c.ok else [x for x in c.violations if x.strip()]
+        n = state.get("critique_rounds", 0)
+        if v and (n >= int(cfg.get("critique_sendbacks", 2)) or state.get("iteration", 0) >= max_iter):
+            # The plain-code checks and the tamper-tested catch tests passed; the reviewer's remaining points go
+            # into the pull request for the engineer instead of looping until the round limit.
+            return {"critique": {**c.model_dump(), "unresolved": v}, "feedback": []}
+        hist = list(state.get("history", []))
+        if v:
+            hist.append({"round": state.get("iteration"), "stage": "critique", "problems": v})
+        return {"critique": c.model_dump(), "feedback": [f"review: {x}" for x in v], "history": hist,
+                "critique_rounds": n + (1 if v else 0)}
 
     def after_verify(state):
         if state.get("outcome"):
@@ -252,15 +266,28 @@ def pr_text(state: dict, cfg: dict) -> tuple:
              + (f", failing as findings: {len(state['findings'])}" if state.get("findings") else ""),
              "- AGENTS.md diff checks: catalog only, no pinned versions, no node names/IPs, protected paths "
              "untouched, no weakened assertions, no xfail: passed",
-             f"- self-review: {'passed' if state.get('critique', {}).get('ok', True) else 'see notes'}",
+             f"- self-review: {'passed' if not state.get('critique', {}).get('unresolved') else 'open points below'}",
              f"- rounds: {state.get('iteration')}", "",
-             "```", "\n".join(state["tests"]["tail"].splitlines()[-15:]), "```", "",
+             "```", "\n".join(state["tests"]["tail"].splitlines()[-15:]), "```", ""]
+    if state.get("critique", {}).get("unresolved"):
+        body += ["## Self-review points the agent did not resolve (please check)"]
+        body += [f"- {x}" for x in state["critique"]["unresolved"]] + [""]
+    body += [
              "Opened by the Multi-Agents test-coding agent. Review it like any other change; it was never merged "
              "by the agent."]
     return title, "\n".join(body)
 
 
 # ------------------------------------------------------------------ CLI
+
+def last_feedback(state: dict) -> str:
+    """Why each round was sent back (for gave_up runs)."""
+    lines = []
+    for h in state.get("history") or []:
+        lines.append(f"round {h['round']} ({h['stage']}):")
+        lines += [f"  - {p[:300]}" for p in h["problems"]]
+    return "\n".join(lines) or f"no recorded problems; plan: {state.get('reason', '')}"
+
 
 def load_cfg(path: Path = CONFIG) -> dict:
     return yaml.safe_load(path.read_text())
@@ -320,7 +347,8 @@ async def main():
     state, branch, path = await run(task, cfg, repo, get_model("executor"))
     record = {"task": task, "branch": branch, "path": str(path), "outcome": state.get("outcome"),
               "reason": state.get("reason", ""), "rounds": state.get("iteration"),
-              "report": state.get("report"), "findings": state.get("findings"), "seconds": int(time.monotonic() - t0)}
+              "report": state.get("report"), "findings": state.get("findings"), "history": state.get("history"),
+              "critique": state.get("critique"), "seconds": int(time.monotonic() - t0)}
     print(f"\noutcome: {state.get('outcome')}  {state.get('reason', '')}  (rounds: {state.get('iteration')})")
     if state.get("outcome") == "ready":
         title, body = pr_text(state, cfg)
@@ -333,8 +361,8 @@ async def main():
             pr = repo.github.open_pr(branch, cfg.get("base", "main"), title, body, draft=bool(state.get("findings")))
             record.update(commit=sha, pr=pr.get("html_url"))
             print(f"pushed {branch} {sha[:9]}\npull request: {pr.get('html_url')}")
-    elif state.get("report", {}).get("problems"):
-        print("open problems:\n- " + "\n- ".join(state["report"]["problems"]))
+    if state.get("outcome") == "gave_up":
+        print(last_feedback(state))
     (STATE / "runs").mkdir(parents=True, exist_ok=True)
     (STATE / "runs" / f"{branch.split('/', 1)[1]}.json").write_text(json.dumps(record, indent=1))
 

@@ -20,7 +20,7 @@ import yaml
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
-from agents.coder.graph import load_cfg, run  # noqa: E402
+from agents.coder.graph import last_feedback, load_cfg, run  # noqa: E402
 from agents.coder.sandbox import failed_tests, run_pytest  # noqa: E402
 
 TASKS = Path(__file__).with_name("tasks.yaml")
@@ -91,8 +91,12 @@ async def main():
         state, branch, path = await run(c["task"], cfg, repo, model)
         ok, why = score(c, state, path, cfg)
         rows.append({"id": c["id"], "ok": ok, "why": why, "outcome": state.get("outcome"),
-                     "rounds": state.get("iteration"), "seconds": int(time.monotonic() - t0), "branch": branch})
+                     "rounds": state.get("iteration"), "seconds": int(time.monotonic() - t0), "branch": branch,
+                     "history": state.get("history"), "critique": state.get("critique"),
+                     "summary": state.get("summary")})
         print(f"[{'PASS' if ok else 'FAIL'}] {c['id']:15s} {why}  ({rows[-1]['seconds']}s, rounds {state.get('iteration')})")
+        if not ok and state.get("outcome") == "gave_up":
+            print("\n".join("      " + l for l in last_feedback(state).splitlines()[-12:]))
         if not args.keep:
             repo.drop(path, branch)
     n = sum(r["ok"] for r in rows)

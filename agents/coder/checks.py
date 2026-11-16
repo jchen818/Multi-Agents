@@ -58,8 +58,31 @@ def parse_diff(text: str) -> dict:
     return files
 
 
-def check(diff_text: str, cfg: dict, catalog_text: str, protected) -> Report:
-    """protected: callable(path) -> bool (Workspace.protected)."""
+def changed_expectations(old_text: str, new_text: str) -> list:
+    """Keys of a platform YAML whose value changed or vanished (new keys are fine). Formatting and comments ignored."""
+    import yaml
+    try:
+        old, new = yaml.safe_load(old_text) or {}, yaml.safe_load(new_text) or {}
+    except yaml.YAMLError as e:
+        return [f"not valid YAML any more: {e}"]
+    out = []
+
+    def walk(o, n, path):
+        if isinstance(o, dict):
+            for k, v in o.items():
+                if not isinstance(n, dict) or k not in n:
+                    out.append(f"{path}{k} removed")
+                else:
+                    walk(v, n[k], f"{path}{k}.")
+        elif o != n:
+            out.append(f"{path.rstrip('.')}: {o!r} -> {n!r}")
+    walk(old, new, "")
+    return out
+
+
+def check(diff_text: str, cfg: dict, catalog_text: str, protected, versions=None) -> Report:
+    """protected: callable(path) -> bool (Workspace.protected).
+    versions: optional callable(path) -> (old_text, new_text), used to compare platform YAML by value."""
     rep = Report()
     files = parse_diff(diff_text)
     rep.files = sorted(files)
@@ -95,9 +118,13 @@ def check(diff_text: str, cfg: dict, catalog_text: str, protected) -> Report:
             if gone > came:
                 rep.problems.append(f"{path}: {gone - came} assert(s) removed from an existing test (rule 5)")
         if path.startswith("config/platforms/") and not ch["new"]:
-            changed = [t for t in ch["removed"] if t.strip() and not t.strip().startswith("#")]
+            if versions is not None:
+                changed = changed_expectations(*versions(path))
+            else:
+                changed = [t.strip() for t in ch["removed"] if t.strip() and not t.strip().startswith("#")]
             if changed:
-                rep.problems.append(f"{path}: existing expectation changed (rule 5): {changed[0].strip()[:100]}")
+                rep.problems.append(f"{path}: existing expectation changed (rule 5): {'; '.join(changed)[:200]}. "
+                                    f"Add new keys only; keep every existing line.")
         if path == "gpuval/commands.py":
             before = set(CMD_KEY.findall("\n".join(ch["removed"])))
             after = set(CMD_KEY.findall("\n".join(t for _, t in ch["added"])))

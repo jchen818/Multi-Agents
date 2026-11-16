@@ -1,0 +1,29 @@
+# Test-coding agent (Phase 4). It grows the gpu-validation suite and opens pull requests; a person merges them.
+repo: jchen818/gpu-validation          # the ONLY repo it touches; the token in secrets/github.yaml is scoped to it
+base: main                             # never pushed to: the agent pushes only agent/<task> branches
+branch_prefix: agent/
+max_iterations: 5                      # code -> test -> check rounds before it gives up (no push)
+max_steps: 40                          # model calls per coding round
+
+# pytest runs here, never on the host: no network, read-only checkout, no capabilities, replay mode only.
+sandbox:
+  backend: docker                      # docker | local (local = tests only; refused by the CLI)
+  image: multi-agents/coder-sandbox:1
+  timeout_s: 300
+  memory: 2g
+  cpus: "2"
+
+# Paths the agent may not change. Engineers own these (AGENTS.md rules 1, 4).
+protected:
+  - recordings/                        # captured from real nodes; known_findings are added by an engineer
+  - AGENTS.md
+  - .github/
+  - conftest.py                        # replay wiring and the known-findings xfail hook
+  - tests/test_catalog.py              # the read-only safety checks on the command catalog
+  - tools/capture.py
+  - gpuval/runner.py
+writable_suffixes: [.py, .yaml, .yml, .md, .ini, .txt]
+max_file_bytes: 100000
+
+# Host names and addresses that must never appear in the suite (AGENTS.md rule 3). Plus any IPv4 address.
+forbidden_names: [mitacai, nfs-server, musalab-kvm, mitac]

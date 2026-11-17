@@ -142,8 +142,14 @@ def check(diff_text: str, cfg: dict, catalog_text: str, protected, versions=None
             if path.startswith("tests/") and re.match(r"\s*def (test_\w+)", text):
                 rep.new_tests.append(f"{path}::{re.match(r'\s*def (test_\w+)', text).group(1)}")
         if path.startswith("tests/") and not ch["new"]:
-            gone = sum(1 for t in ch["removed"] if re.match(r"\s*assert\b", t))
-            came = sum(1 for _, t in ch["added"] if re.match(r"\s*assert\b", t))
+            removed_tests = {m.group(1) for t in ch["removed"] if (m := re.match(r"\s*def (test_\w+)", t))}
+            added_tests = {m.group(1) for _, t in ch["added"] if (m := re.match(r"\s*def (test_\w+)", t))}
+            for name in sorted(removed_tests - added_tests):
+                rep.problems.append(f"{path}: existing test {name} was deleted or renamed (rule 5). Keep every "
+                                    f"existing test exactly as it is and ADD yours below it")
+            check_line = r"\s*(assert\b|with pytest\.raises\b)"
+            gone = sum(1 for t in ch["removed"] if re.match(check_line, t))
+            came = sum(1 for _, t in ch["added"] if re.match(check_line, t))
             if gone > came:
                 rep.problems.append(f"{path}: {gone - came} assert(s) removed from an existing test (rule 5)")
         if path.startswith("config/platforms/") and not ch["new"]:

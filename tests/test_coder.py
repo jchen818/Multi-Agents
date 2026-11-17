@@ -376,3 +376,15 @@ def test_slow_coding_round_is_cut_off(mini):
                     agent_factory=lambda m, w, c: Slow())
     s = asyncio.run(g.ainvoke({"task": "x"}))
     assert s["outcome"] == "gave_up" and "stopped after 1s" in s["summary"]
+
+
+def test_deleting_an_existing_test_is_a_problem(mini):
+    rep = run_checks(mini, {"tests/test_checks_catch.py": "def test_my_new_catch():\n    assert True\n"})
+    assert any("existing test test_catch_basic was deleted" in p for p in rep.problems), rep.problems
+
+
+def test_model_calls_are_bounded():
+    from langchain_openai import ChatOpenAI
+    from agents.coder.graph import limit_model
+    m = limit_model(ChatOpenAI(model="x", base_url="http://h/v1", api_key="E"), CFG)
+    assert (m.max_tokens, m.request_timeout, m.max_retries) == (CFG["model_max_tokens"], CFG["model_timeout_s"], 1)

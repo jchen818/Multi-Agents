@@ -48,6 +48,9 @@ The repository's AGENTS.md is the law; the rules below repeat the parts you trip
 - No node names, host names or IP addresses anywhere.
 - Never weaken or delete an assertion, never add xfail, never touch recordings/, conftest.py, AGENTS.md.
 - Reuse the fixtures (runner, platform, bdfs, static) and the parsers in gpuval/amdsmi.py.
+- Never delete, rename or rewrite an existing test: when you change a file, keep all of its content and add yours.
+- A field that reads N/A in the recorded data is not reported on this platform: a check on it can never fail here.
+  Get the data another way (a read-only catalog command) instead.
 - Read only fields that exist in the recorded data. Never default a missing field (g.get("x", 0)): a check on a
   field that is not there can never fail. Prefer data the recording already has over a new command.
 - Every new check gets a catch test in tests/test_checks_catch.py: tamper a copy of the recording so the data is
@@ -341,12 +344,22 @@ def list_work(cfg):
         print(f"{r.get('outcome', '?'):8} {r.get('branch', '')}  {r.get('pr', '') or r.get('reason', '')}")
 
 
+def limit_model(model, cfg: dict):
+    """Bound every model call: a local model can loop on repeated text until its context fills, which takes many
+    minutes per call. Cap the output length and the time per request (one retry)."""
+    upd = {k: v for k, v in (("max_tokens", int(cfg.get("model_max_tokens", 8192))),
+                             ("request_timeout", float(cfg.get("model_timeout_s", 300))),
+                             ("max_retries", 1)) if k in type(model).model_fields}
+    return model.model_copy(update=upd) if upd and hasattr(model, "model_copy") else model
+
+
 async def run(task: str, cfg: dict, repo, model, runner=None):
     """Fresh worktree from the base branch, then the graph. Returns (state, branch, path). Never pushes."""
     base_sha = repo.sync()
     branch, path = repo.new_worktree(task)
     print(f"worktree {path}\nbranch   {branch} (from {cfg.get('base', 'main')} {base_sha[:9]})")
     ws = Workspace(path, cfg, **({"runner": runner} if runner else {}))
+    model = limit_model(model, cfg)
     run_cfg = {"recursion_limit": 100}
     try:
         from langfuse.langchain import CallbackHandler

@@ -5,6 +5,8 @@ branch_prefix: agent/
 max_iterations: 5                      # code -> test -> check rounds before it gives up (no push)
 critique_sendbacks: 2                  # the self-review may send work back this often; later points go into the PR
 code_round_seconds: 900                # wall-clock cap per coding round (the model loop), then verify what exists
+model_max_tokens: 8192                 # per model reply; stops runaway repetition
+model_timeout_s: 300                   # per model request
 max_steps: 40                          # model calls per coding round
 
 # pytest runs here, never on the host: no network, read-only checkout, no capabilities, replay mode only.

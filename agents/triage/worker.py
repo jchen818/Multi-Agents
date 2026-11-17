@@ -6,9 +6,11 @@ and a short JSON note (top causes, bug draft summary). It files nothing. On the 
 replied as triage_failed instead of being retried again.
 
     .venv/bin/python -m agents.triage.worker            # runs until stopped; honors agents:kill
+    sudo systemctl start agents-triage-worker@1         # as a service (deploy/systemd)
 """
 import asyncio
 import json
+import signal
 import sys
 from contextlib import AsyncExitStack
 from pathlib import Path
@@ -56,7 +58,17 @@ async def main():
             return await g.ainvoke({"archive": archive, "exclude_bugs": []})
 
         r = connect()
-        await Worker(r, "triage", make_handler(run_triage, triage.save)).run()
+        stop = asyncio.Event()
+        loop = asyncio.get_running_loop()
+        for sig in (signal.SIGTERM, signal.SIGINT):   # systemd stop: finish the current message, then exit
+            loop.add_signal_handler(sig, stop.set)
+        await Worker(r, "triage", make_handler(run_triage, triage.save)).run(stop)
+        print("triage worker stopped")
+    try:
+        from langfuse import get_client
+        get_client().flush()
+    except Exception:
+        pass
 
 
 if __name__ == "__main__":

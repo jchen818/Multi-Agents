@@ -1,0 +1,38 @@
+# Triage worker (Phase 6.4): consumes agents:triage:in. Instance name = worker number (agents-triage-worker@1).
+# Installed by deploy/systemd/install.sh; runs as the agents' Unix user from the repo checkout.
+[Unit]
+Description=Multi-Agents triage worker %i
+After=network-online.target docker.service
+Wants=network-online.target
+# Redis runs in Docker (deploy/redis, restart: unless-stopped); the worker retries until it is reachable.
+StartLimitIntervalSec=600
+StartLimitBurst=10
+
+[Service]
+Type=simple
+User=@USER@
+Group=@GROUP@
+WorkingDirectory=@ROOT@
+# agents.env is a shell file (set -a; source), so load it through bash rather than EnvironmentFile=
+ExecStart=/bin/bash -c 'set -a; source ./agents.env; set +a; exec ./.venv/bin/python -m agents.triage.worker'
+Restart=on-failure
+RestartSec=15
+# SIGTERM lets the current message finish; after this the process is killed and the message is redelivered.
+KillSignal=SIGTERM
+TimeoutStopSec=300
+Environment=PYTHONUNBUFFERED=1
+
+# Hardening: no privilege gain, private /tmp, OS directories read-only. It needs the repo, the network
+# (vLLM, Qdrant, Redis, SearXNG, Bugzilla read-only) and its own home for model/tool caches.
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=full
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryMax=8G
+
+[Install]
+WantedBy=multi-user.target

@@ -23,8 +23,31 @@ def unknown_name(kwargs):
             return f"{key} '{value}' is not configured. Configured {key}s: {', '.join(sorted(names))}"
     return None
 
+_KILL_CACHE = {"t": 0.0, "v": False, "client": None}
+
+
+def _redis_kill() -> bool:
+    """The Redis kill key (agents:kill, Phase 6.2), checked at most every 2 s. If Redis is unreachable this check
+    is skipped (the state/KILL file still works), so a Redis outage cannot stop or wedge the agents."""
+    url = os.getenv("REDIS_URL")
+    if not url:
+        return False
+    now = time.monotonic()
+    if now - _KILL_CACHE["t"] < 2:
+        return _KILL_CACHE["v"]
+    try:
+        if _KILL_CACHE["client"] is None:
+            import redis
+            _KILL_CACHE["client"] = redis.from_url(url, socket_timeout=1, socket_connect_timeout=1)
+        v = bool(_KILL_CACHE["client"].exists("agents:kill"))
+    except Exception:
+        v = False
+    _KILL_CACHE.update(t=now, v=v)
+    return v
+
+
 def killed() -> bool:
-    return KILL_FILE.exists()
+    return KILL_FILE.exists() or _redis_kill()
 
 def to_text(content) -> str:
     if isinstance(content, str):

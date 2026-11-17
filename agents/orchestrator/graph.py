@@ -21,6 +21,7 @@ Expected versions come from the run request (--expect), never from code: they ch
     .venv/bin/python -m agents.orchestrator.graph --node sim "quick health check"
     SIM_NODES=sim2,sim3,sim4 .venv/bin/python -m agents.orchestrator.graph --node sim --node sim2 --node sim3 \\
         --node sim4 "quick health check"                          # four simulated nodes in dry-run
+    .venv/bin/python -m agents.orchestrator.graph --bus --node sim "..."   # triage via the Redis worker (6.2)
     .venv/bin/python -m agents.orchestrator.graph --resume <run_id>
     .venv/bin/python -m agents.orchestrator.graph --list
 """
@@ -213,10 +214,12 @@ def run_markdown(state: dict) -> str:
 
 # ------------------------------------------------------------------ graph
 
-def build_graph(planner_factory, preflight, triage_run=None, recipes=None, checkpointer=None, home: Path = RUNS):
+def build_graph(planner_factory, preflight, triage_run=None, recipes=None, checkpointer=None, home: Path = RUNS,
+                bus=None, triage_timeout_s: float = 3600):
     """planner_factory() -> compiled Phase 2 planner graph without a checkpointer (used as the PLANNING subgraph and,
     with a pre-approved plan, once per node). preflight(node) -> awaitable preflight text (the agfhc tool).
-    triage_run(archive) -> awaitable triage state, or None to skip analysis. recipes: RecipeStore to save the plan."""
+    triage_run(archive) -> awaitable triage state, or None to skip analysis. recipes: RecipeStore to save the plan.
+    bus: core.bus.Bus("orchestrator"): failed steps go to the triage worker over Redis instead of triage_run."""
     planning = planner_factory()
     node_planner = planner_factory()
 
@@ -326,35 +329,78 @@ def build_graph(planner_factory, preflight, triage_run=None, recipes=None, check
         return Command(goto="report", update={"phase": "DONE" if all_done else "FAILED", "recipe_saved": saved,
                                               "dryrun": all(r.get("dryrun", True) for r in rs)})
 
+    async def triage_via_bus(state, items):
+        """Send one triage_request per failed step to the triage worker(s), then wait for every reply. A reply
+        already on the stream (the run resumed) is reused instead of asking again."""
+        sent = {}
+        for it in items:
+            key = f"{state['run_id']}/{it['node']}/{it['run_id']}"
+            got = await bus.find_reply(key)
+            if got is None:
+                since = (await bus.r.xrevrange("agents:orchestrator:in", count=1) or [("0-0", {})])[0][0]
+                try:
+                    await bus.send("triage", "triage_request", state["run_id"], artifact_path=it["archive"],
+                                   note=f"{it['node']} {it['recipe']}", reply_to="agents:orchestrator:in", key=key)
+                except Exception as e:                  # e.g. the archive is outside the bus's artifact roots
+                    it["_reply"] = {"type": "triage_failed", "note": f"not sent: {e}"}
+                    it["_key"] = key
+                    continue
+                sent[key] = since
+            else:
+                it["_reply"] = got
+            it["_key"] = key
+        for it in items:
+            if "_reply" not in it:
+                it["_reply"] = await bus.wait_reply(it["_key"], sent[it["_key"]], triage_timeout_s)
+            rep = it.pop("_reply")
+            it.pop("_key")
+            if rep is None:
+                it["error"] = f"no triage reply within {int(triage_timeout_s)} s (is the triage worker running?)"
+            elif rep.get("type") == "triage_failed":
+                it["error"] = f"triage worker: {rep.get('note', '')[:300]}"
+            else:
+                note = json.loads(rep.get("note") or "{}")
+                it.update(top=note.get("top") or [], draft_summary=note.get("draft_summary", ""),
+                          saved=rep.get("artifact_path", ""))
+
     async def analyze(state: State):
         audit = audit_for(state)
-        out = []
+        items = []
         for nr in sorted(state.get("node_results") or [], key=lambda r: r["node"]):
             for r in nr["results"]:
                 if r.get("verdict") != "FAIL":
                     continue
-                if killed():
-                    audit.log("stopped", where="ANALYZING")
-                    break
                 arch = archive_of(r.get("analysis", ""))
                 item = {"node": nr["node"], "recipe": r["recipe"], "run_id": r.get("run_id"), "archive": arch,
                         "top": []}
-                if triage_run is None:
-                    item["error"] = "triage disabled"
-                elif not arch or not Path(arch).is_dir():
+                if not arch or not Path(arch).is_dir():
                     item["error"] = f"archive not found on this host: {arch or 'no archive line'}"
-                else:
-                    try:
-                        t = await triage_run(arch)
-                        item["top"] = [top_cause(c) for c in (t.get("ranked") or [])[:3]]
-                        item["draft_summary"] = (t.get("draft") or {}).get("summary", "")
-                        item["saved"] = t.get("_saved", "")
-                    except Exception as e:
-                        item["error"] = f"{type(e).__name__}: {e}"[:300]
-                audit.log("triage", node=nr["node"], recipe=item["recipe"], run_id=item["run_id"], top=item["top"],
-                          error=item.get("error"))
-                out.append(item)
-        return {"triage": out, "phase": "FAILED",
+                elif bus is None and triage_run is None:
+                    item["error"] = "triage disabled"
+                items.append(item)
+        todo = [it for it in items if "error" not in it]
+        if killed():
+            audit.log("stopped", where="ANALYZING")
+            for it in todo:
+                it["error"] = "stopped by the kill switch"
+        elif bus is not None:
+            await triage_via_bus(state, todo)
+        else:
+            for it in todo:
+                if killed():
+                    it["error"] = "stopped by the kill switch"
+                    continue
+                try:
+                    t = await triage_run(it["archive"])
+                    it["top"] = [top_cause(c) for c in (t.get("ranked") or [])[:3]]
+                    it["draft_summary"] = (t.get("draft") or {}).get("summary", "")
+                    it["saved"] = t.get("_saved", "")
+                except Exception as e:
+                    it["error"] = f"{type(e).__name__}: {e}"[:300]
+        for it in items:
+            audit.log("triage", node=it["node"], recipe=it["recipe"], run_id=it["run_id"], top=it["top"],
+                      error=it.get("error"), via="bus" if bus is not None else "in-process")
+        return {"triage": items, "phase": "FAILED",
                 "dryrun": all(r.get("dryrun", True) for r in state.get("node_results") or [])}
 
     def report(state: State):
@@ -438,6 +484,8 @@ async def main():
     ap.add_argument("--resume", help="continue a run waiting for a decision")
     ap.add_argument("--list", action="store_true")
     ap.add_argument("--no-research", action="store_true", help="triage without the web research step")
+    ap.add_argument("--bus", action="store_true", help="send failed steps to the triage worker over Redis "
+                                                       "(REDIS_URL; start it with python -m agents.triage.worker)")
     args = ap.parse_args()
     if args.list:
         return list_runs()
@@ -469,9 +517,14 @@ async def main():
             from agents.test_planner.graph import _text
             return _text(await tools["preflight"](node=node))
 
+        bus = None
+        if args.bus:
+            from core.bus import Bus, connect
+            bus = Bus(connect(), "orchestrator")
         graph = build_graph(lambda: planner_graph(tools, get_model("planner"), get_model("executor"), None,
                                                   recipes=store),
-                            preflight, triage_run=triage_run, recipes=store, checkpointer=saver)
+                            preflight, triage_run=None if bus else triage_run, recipes=store, checkpointer=saver,
+                            bus=bus)
         run_id = args.resume or f"run-{time.strftime('%Y%m%d-%H%M%S')}-{uuid.uuid4().hex[:4]}"
         cfg = {"configurable": {"thread_id": run_id}, "recursion_limit": 200}
         try:

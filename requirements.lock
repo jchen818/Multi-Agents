@@ -11,6 +11,7 @@ click==8.5.1
 cryptography==50.0.2
 distro==1.9.0
 docstring_parser==0.18.0
+fakeredis==2.40.0
 googleapis-common-protos==1.76.0
 grpcio==1.85.1
 h11==0.16.0
@@ -69,6 +70,7 @@ python-multipart==0.0.33
 pytz==2026.6
 PyYAML==6.0.3
 qdrant-client==1.20.0
+redis==6.4.0
 referencing==0.37.0
 regex==2026.11.9
 requests-toolbelt==1.0.0

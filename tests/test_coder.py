@@ -100,7 +100,7 @@ def run_checks(mini, files):
     ({"tests/test_x.py": 'def test_x():\n    assert host != "mitacai"\n'}, "node/host name"),
     ({"tests/test_x.py": 'def test_x(v):\n    assert v == "7.2.1"\n'}, "pinned version"),
     ({"tests/test_x.py": 'import pytest\n@pytest.mark.xfail\ndef test_x():\n    assert 0\n'}, "xfail"),
-    ({"tests/test_x.py": 'import pytest\ndef test_x():\n    pytest.skip("flaky")\n'}, "skip added"),
+    ({"tests/test_x.py": 'import pytest\ndef test_x():\n    pytest.skip("flaky")\n'}, "remove this skip"),
     ({"tests/test_x.py": 'import pytest\ndef test_x():\n    pytest.skip("recording lacks it: re-capture")\n'}, None),
     ({"tests/test_x.py": 'def test_x(runner):\n    runner.run("dmesg_all")\n'}, "not in gpuval/commands.py"),
     ({"tests/test_basic.py": "def test_basic():\n    pass\n"}, "assert(s) removed"),

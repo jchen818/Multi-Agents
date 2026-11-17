@@ -28,7 +28,7 @@ from langgraph.graph import StateGraph, START, END
 from pydantic import BaseModel, Field
 
 from agents.coder import checks
-from agents.coder.sandbox import failed_tests
+from agents.coder.sandbox import failed_tests, failure_messages
 from agents.coder.workspace import Workspace, diff
 from core.guard import killed, to_text
 from core.structured import structured
@@ -148,11 +148,16 @@ def build_graph(model, ws: Workspace, cfg: dict, agent_factory=None):
         plan_text = f"data: {p.get('data')}\nfiles: {', '.join(p.get('files', []))}\n" + \
                     "\n".join(f"{i + 1}. {s}" for i, s in enumerate(p.get("steps", [])))
         agent = (agent_factory or _agent)(model, ws, cfg)
-        res = await agent.ainvoke({"messages": [("user", CODE_PROMPT.format(task=state["task"], plan=plan_text,
+        limit = int(cfg.get("code_round_seconds", 900))
+        try:
+            res = await asyncio.wait_for(agent.ainvoke({"messages": [("user", CODE_PROMPT.format(task=state["task"], plan=plan_text,
                                                                                data=ws.recorded_data()[0],
                                                                                feedback=fb))]},
-                                  config={"recursion_limit": 4 * int(cfg.get("max_steps", 40)) + 10})
-        summary = to_text(res["messages"][-1].content).strip()
+                                  config={"recursion_limit": 4 * int(cfg.get("max_steps", 40)) + 10}),
+                timeout=limit)
+            summary = to_text(res["messages"][-1].content).strip()
+        except asyncio.TimeoutError:
+            summary = f"(coding round stopped after {limit}s; checking what was written so far)"
         return {"summary": summary, "iteration": state.get("iteration", 0) + 1}
 
     async def verify(state):
@@ -173,10 +178,16 @@ def build_graph(model, ws: Workspace, cfg: dict, agent_factory=None):
         tests = ws.runner(ws.root, cfg, [])
         failed = failed_tests(tests["output"])
         findings = {t: why for t, why in ws.findings.items() if t in failed}
+        why = failure_messages(tests["output"])
         for t in failed:
             if t not in findings:
-                problems.append(f"test fails: {t} (fix it, or declare_finding if it is a NEW check and the recording "
-                                f"really shows a problem)")
+                msg = f": {why[t][:400]}" if why.get(t) else ""
+                hint = (" A catch test must tamper the field your check reads, in the recording's real structure "
+                        "(see the recorded data list), so the check raises AssertionError."
+                        if "test_checks_catch" in t else "")
+                problems.append(f"test fails: {t}{msg}. Fix it (run_tests on it to see the traceback), or "
+                                f"declare_finding if it is a NEW check and the recording really shows a problem."
+                                f"{hint}")
         for t in findings:
             if t not in rep.new_tests:
                 problems.append(f"{t}: only a NEW test can be declared a finding; existing tests must keep passing")

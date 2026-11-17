@@ -56,3 +56,14 @@ def failed_tests(output: str) -> list:
         if line.startswith(("FAILED ", "ERROR ")):
             out.append(line.split()[1].split(" - ")[0])
     return out
+
+
+def failure_messages(output: str) -> dict:
+    """{node id: the assertion message from pytest's short summary line} for failed/errored tests."""
+    out = {}
+    for line in output.splitlines():
+        if line.startswith(("FAILED ", "ERROR ")):
+            rest = line.split(" ", 1)[1]
+            tid, _, msg = rest.partition(" - ")
+            out[tid.strip()] = msg.strip()
+    return out

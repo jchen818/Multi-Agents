@@ -356,3 +356,23 @@ def test_eval_scoring_rules(tmp_path):
     cap = {"outcome": "ready", "report": {"new_tests": ["tests/test_b.py::test_b"], "new_commands": ["bad_pages"]},
            "tests": {"tail": "SKIPPED [1] tests/test_b.py: recording lacks bad_pages: re-capture"}}
     assert score({"expect": "capture"}, cap, tmp_path, CFG)[0]
+
+
+def test_failure_messages_reach_the_model(mini):
+    from agents.coder.sandbox import failure_messages
+    assert failure_messages("FAILED tests/a.py::test_b - AssertionError: GPU 3 power cap 750 W\nok") == \
+        {"tests/a.py::test_b": "AssertionError: GPU 3 power cap 750 W"}
+    bad = ({**GOOD[0], "tests/test_count.py": 'def test_count():\n    assert 7 == 8, "only 7 GPUs listed"\n'}, "x", None)
+    s = run_graph(mini, PLAN, [bad])
+    assert any("only 7 GPUs listed" in p for p in s["report"]["problems"])
+
+
+def test_slow_coding_round_is_cut_off(mini):
+    class Slow:
+        async def ainvoke(self, inputs, config=None):
+            await asyncio.sleep(5)
+    ws = Workspace(mini, CFG)
+    g = build_graph(FakeModel(PLAN), ws, {**CFG, "code_round_seconds": 1, "max_iterations": 1},
+                    agent_factory=lambda m, w, c: Slow())
+    s = asyncio.run(g.ainvoke({"task": "x"}))
+    assert s["outcome"] == "gave_up" and "stopped after 1s" in s["summary"]

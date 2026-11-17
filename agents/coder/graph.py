@@ -60,7 +60,9 @@ Plan:
 
 Work in this order: look at the data the check needs (search recordings/*/out/*.txt), write the test, write its
 catch test, run_tests on your new tests, then run_tests with no target (the whole suite must pass; known findings
-are xfail and fine). If a NEW test fails on the recording and the recording really shows a hardware/stack problem
+are xfail and fine). Data missing from every recording is normal for a new kind of check: follow the
+new-command rule (catalog entry + rc 127 skip) and still write the test; never finish without writing files.
+If a NEW test fails on the recording and the recording really shows a hardware/stack problem
 (not a bug in your test), call declare_finding with the evidence instead of changing the check.
 Finish with: first line = a pull request title (under 70 characters), then 2-5 lines on what the check verifies,
 which recorded data it reads, and anything an engineer must do (e.g. re-capture).{feedback}"""
@@ -146,7 +148,12 @@ def build_graph(model, ws: Workspace, cfg: dict, agent_factory=None):
         rep = checks.check(d, cfg, ws.read_file("gpuval/commands.py"), ws.protected, versions=ws.versions)
         problems += rep.problems
         if d.strip() == "(no changes)":
-            problems.append("no files were changed")
+            said = " ".join((state.get("summary") or "").split())[:300]
+            problems.append(
+                "no files were changed" + (f" (your last message: \"{said}\")" if said else "") + ". You must write "
+                "the test files with write_file. If no recording has the data, that is expected: add a read-only "
+                "command to gpuval/commands.py, write the test so it skips with 're-capture with tools/capture.py' "
+                "when runner.run returns rc 127, and say in the summary that a re-capture is needed")
         tests = ws.runner(ws.root, cfg, [])
         failed = failed_tests(tests["output"])
         findings = {t: why for t, why in ws.findings.items() if t in failed}

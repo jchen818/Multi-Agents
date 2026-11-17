@@ -108,8 +108,12 @@ def check(diff_text: str, cfg: dict, catalog_text: str, protected, versions=None
                 if XFAIL.search(text):
                     rep.problems.append(f"{where}: xfail added; only an engineer marks known findings (rule 4/5)")
                 if SKIP.search(text) and not re.search(r"captur|recording", text, re.I):
-                    rep.problems.append(f"{where}: skip added; a test may only skip when the recording lacks the "
-                                        f"data, saying 're-capture with tools/capture.py' (rule 4)")
+                    rep.problems.append(
+                        f"{where}: remove this skip: `{text.strip()[:120]}`. A test may only skip when runner.run "
+                        f"returns rc 127 (the recording lacks the command), with a message containing 're-capture "
+                        f"with tools/capture.py'. If the check depends on the hardware layout (sockets, NUMA nodes, "
+                        f"GPU count), put the expected value in config/platforms/<platform>.yaml as a NEW key and "
+                        f"assert against it instead of skipping (rule 4)")
             if path.startswith("tests/") and re.match(r"\s*def (test_\w+)", text):
                 rep.new_tests.append(f"{path}::{re.match(r'\s*def (test_\w+)', text).group(1)}")
         if path.startswith("tests/") and not ch["new"]:

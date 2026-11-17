@@ -503,7 +503,8 @@ async def main():
         saver = await stack.enter_async_context(AsyncSqliteSaver.from_conn_string(str(ROOT / "state/orchestrator.db")))
         tools = await mcp_tools(stack)
         store = recipe_store()
-        web = None if args.no_research else await triage.production_research(stack)
+        # with --bus the triage worker does the research; the orchestrator does not need the web tools
+        web = None if (args.no_research or args.bus) else await triage.production_research(stack)
 
         async def triage_run(archive):
             from agents.triage.episodes import EpisodeStore, _memory

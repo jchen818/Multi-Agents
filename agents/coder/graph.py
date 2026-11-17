@@ -48,6 +48,8 @@ The repository's AGENTS.md is the law; the rules below repeat the parts you trip
 - No node names, host names or IP addresses anywhere.
 - Never weaken or delete an assertion, never add xfail, never touch recordings/, conftest.py, AGENTS.md.
 - Reuse the fixtures (runner, platform, bdfs, static) and the parsers in gpuval/amdsmi.py.
+- Read only fields that exist in the recorded data. Never default a missing field (g.get("x", 0)): a check on a
+  field that is not there can never fail. Prefer data the recording already has over a new command.
 - Every new check gets a catch test in tests/test_checks_catch.py: tamper a copy of the recording so the data is
   wrong, and assert your check raises AssertionError (see the existing catch tests there).
 - Messages name GPUs and values exactly as the data does, so a failure explains itself.
@@ -57,6 +59,9 @@ CODE_PROMPT = """Task: {task}
 
 Plan:
 {plan}
+
+Recorded data (prefer these fields; add a catalog command only when none of them has what the check needs):
+{data}
 
 Work in this order: look at the data the check needs (search recordings/*/out/*.txt), write the test, write its
 catch test, run_tests on your new tests, then run_tests with no target (the whole suite must pass; known findings
@@ -106,7 +111,16 @@ def context(ws: Workspace) -> str:
     for p in sorted((ws.root / "config" / "platforms").glob("*.yaml")):
         parts.append(f"## {ws.rel(p)}\n{p.read_text()}")
     parts.append(f"## files\n{ws.list_files()}")
+    parts.append(f"## recorded data (what checks can read today)\n{ws.recorded_data()[0]}")
     return "\n\n".join(parts)
+
+
+def known_fields(ws: Workspace) -> set:
+    keys = set(ws.recorded_data()[1])
+    for p in sorted((ws.root / "config" / "platforms").glob("*.yaml")):
+        from agents.coder.checks import _yaml_keys
+        keys |= _yaml_keys(p.read_text())
+    return keys
 
 
 def build_graph(model, ws: Workspace, cfg: dict, agent_factory=None):
@@ -135,6 +149,7 @@ def build_graph(model, ws: Workspace, cfg: dict, agent_factory=None):
                     "\n".join(f"{i + 1}. {s}" for i, s in enumerate(p.get("steps", [])))
         agent = (agent_factory or _agent)(model, ws, cfg)
         res = await agent.ainvoke({"messages": [("user", CODE_PROMPT.format(task=state["task"], plan=plan_text,
+                                                                               data=ws.recorded_data()[0],
                                                                                feedback=fb))]},
                                   config={"recursion_limit": 4 * int(cfg.get("max_steps", 40)) + 10})
         summary = to_text(res["messages"][-1].content).strip()
@@ -145,7 +160,8 @@ def build_graph(model, ws: Workspace, cfg: dict, agent_factory=None):
             return {"outcome": "stopped", "reason": "kill switch is set"}
         problems = []
         d = diff(ws.root)
-        rep = checks.check(d, cfg, ws.read_file("gpuval/commands.py"), ws.protected, versions=ws.versions)
+        rep = checks.check(d, cfg, ws.read_file("gpuval/commands.py"), ws.protected, versions=ws.versions,
+                           known_fields=known_fields(ws))
         problems += rep.problems
         if d.strip() == "(no changes)":
             said = " ".join((state.get("summary") or "").split())[:300]
@@ -188,9 +204,9 @@ def build_graph(model, ws: Workspace, cfg: dict, agent_factory=None):
         c = await structured(model, Critique, [
             ("system", SYSTEM),
             ("user", f"## AGENTS.md\n{ws.read_file('AGENTS.md')}\n\n## Task\n{state['task']}\n\n## Diff\n"
-                     f"{diff(ws.root)[:40000]}\n\n## pytest (sandbox, replay)\n{state['tests']['tail'][-1500:]}\n\n"
+                     f"{diff(ws.root)[:40000]}\n\n## pytest (sandbox, replay)\n{state['tests']['tail'][-1500:]}\n\n## Recorded data\n{ws.recorded_data()[0]}\n\n"
                      "Review the diff strictly. List only real violations of AGENTS.md or real gaps against the "
-                     "task (a check that cannot fail, a wrong field, a version pinned, a node name, weakened "
+                     "task (a check that cannot fail, a field that is not in the recorded data below, a wrong field, a version pinned, a node name, weakened "
                      "assertions, a test that does not read the recorded data). ok=true when there are none.")])
         if c is None:
             return {"critique": {"ok": True, "violations": [], "note": "no critique from the model"}, "feedback": []}

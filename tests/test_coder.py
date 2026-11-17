@@ -27,6 +27,8 @@ MINI = {
     "config/platforms/mi325x.yaml": "name: mi325x\ngpu_count: 8\n",
     "conftest.py": "",
     "recordings/r1/out/gpu_count.txt": "8\n",
+    "recordings/r1/index.json": "{}\n",
+    "recordings/r1/out/amdsmi_static.txt": '{"gpu_data": [{"gpu": 0, "vram": {"size": {"value": 262128, "unit": "MB"}}}]}',
     "tests/__init__.py": "",
     "tests/test_basic.py": "def test_basic():\n    assert 8 == 8\n",
     "tests/test_checks_catch.py": "def test_catch_basic():\n    assert True\n",
@@ -90,8 +92,9 @@ def diff_of(mini, files: dict) -> str:
 
 def run_checks(mini, files):
     ws = Workspace(mini, CFG)
+    from agents.coder.graph import known_fields
     return checks.check(diff_of(mini, files), CFG, (mini / "gpuval/commands.py").read_text(), ws.protected,
-                        versions=ws.versions)
+                        versions=ws.versions, known_fields=known_fields(ws))
 
 
 @pytest.mark.parametrize("files,expect", [
@@ -109,6 +112,9 @@ def run_checks(mini, files):
     ({"config/platforms/mi325x.yaml": "# reformatted\nname:   mi325x\nvram_mb: 262128\ngpu_count: 8\n"}, None),
     ({"config/platforms/mi325x.yaml": "name: mi325x\nvram_mb: 262128\n"}, "gpu_count removed"),
     ({"recordings/r1/out/gpu_count.txt": "7\n"}, "protected path"),
+    ({"tests/test_x.py": 'def test_x(static, platform):\n    assert all(g["vram"]["size"]["value"] == platform["gpu_count"] for g in static)\n'}, None),
+    ({"tests/test_x.py": 'def test_x(static):\n    assert all(g["ras"].get("total_retired_pages", 0) == 0 for g in static)\n'},
+     "field 'total_retired_pages' does not exist"),
     ({"conftest.py": "x = 1\n"}, "protected path"),
 ])
 def test_diff_checks(mini, files, expect):
@@ -117,6 +123,11 @@ def test_diff_checks(mini, files, expect):
         assert rep.ok, rep.problems
     else:
         assert any(expect in p for p in rep.problems), rep.problems
+
+
+def test_recorded_data_index(mini):
+    text, keys = Workspace(mini, CFG).recorded_data()
+    assert "vram.size=262128 MB" in text and "gpu_count: text: 8" in text and "size" in keys
 
 
 def test_new_catalog_command_is_reported(mini):

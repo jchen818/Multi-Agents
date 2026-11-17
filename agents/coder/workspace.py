@@ -4,6 +4,7 @@ The model gets list_files / read_file / search / write_file / git_diff / run_tes
 shell, git, or the network. Writes are refused for protected paths (config/coder.yaml) and non-text files.
 """
 import fnmatch
+import json
 import re
 import subprocess
 from pathlib import Path
@@ -106,6 +107,47 @@ class Workspace:
         p.write_text(content if content.endswith("\n") else content + "\n")
         return f"wrote {r} ({len(content.splitlines())} lines)"
 
+    def newest_recording(self):
+        recs = sorted(p for p in (self.root / "recordings").glob("*") if (p / "index.json").exists())
+        return recs[-1] if recs else None
+
+    def recorded_data(self, limit: int = 14000) -> tuple:
+        """(text, keys): what the newest recording holds - every JSON field path of the first GPU with a sample
+        value, and the first lines of plain-text outputs - plus the set of all JSON keys in it."""
+        rec = self.newest_recording()
+        if rec is None:
+            return "(no recording)", set()
+        seen = set()
+        lines, keys = [f"recording {rec.name}: catalog name -> fields (GPU 0 shown; every GPU has the same)"], set()
+        for f in sorted((rec / "out").glob("*.txt")):
+            name = f.stem
+            m = re.match(r"(.+?)_[0-9a-f]{4}_[0-9a-f]{2}_[0-9a-f]{2}\.\d$", name)
+            if m:                                 # per-GPU output (<name>_<bdf>): one example is enough
+                if m.group(1) in seen:
+                    continue
+                seen.add(m.group(1))
+                name = f"{m.group(1)} (per GPU, e.g. {name[len(m.group(1)) + 1:]})"
+            text = f.read_text(errors="replace")
+            try:
+                doc = json.loads(text)
+                if not isinstance(doc, (dict, list)):
+                    raise ValueError("scalar")
+            except ValueError:
+                head = " | ".join(l.strip() for l in text.splitlines()[:3] if l.strip())[:160]
+                lines.append(f"{name}: text: {head or '(empty)'}")
+                continue
+            _keys(doc, keys)
+            first = doc.get("gpu_data", doc) if isinstance(doc, dict) else doc
+            if isinstance(first, list) and first and isinstance(first[0], list):
+                first = first[0]
+            sample = first[0] if isinstance(first, list) and first else first
+            flat = []
+            _flatten(sample, "", flat)
+            wrap = "gpu_data[i]" if isinstance(doc, dict) and "gpu_data" in doc else ("[i]" if isinstance(doc, list) else "")
+            lines.append(f"{name} (json{', ' + wrap if wrap else ''}): " + "; ".join(flat)[:6000])
+        text = "\n".join(lines)
+        return (text[:limit] + "\n[... truncated ...]" if len(text) > limit else text), keys
+
     def versions(self, rel: str) -> tuple:
         """(text at the base commit, text now) of one file; '' when it does not exist."""
         r = subprocess.run(["git", "-C", str(self.root), "show", f"HEAD:{rel}"], capture_output=True, text=True)
@@ -151,6 +193,32 @@ class Workspace:
                                                 args_schema=_schema(fn))
         return [wrap(f) for f in (self.list_files, self.read_file, self.search, self.write_file, self.git_diff,
                                   self.run_tests, self.declare_finding)]
+
+
+def _keys(doc, out: set):
+    if isinstance(doc, dict):
+        for k, v in doc.items():
+            out.add(str(k))
+            _keys(v, out)
+    elif isinstance(doc, list):
+        for v in doc:
+            _keys(v, out)
+
+
+def _flatten(x, path, out, depth=0):
+    if isinstance(x, dict) and depth < 6:
+        if set(x) == {"value", "unit"}:
+            out.append(f"{path}={x['value']} {x['unit']}")
+            return
+        for k, v in x.items():
+            _flatten(v, f"{path}.{k}" if path else str(k), out, depth + 1)
+    elif isinstance(x, list) and depth < 6:
+        if x and isinstance(x[0], (dict, list)):
+            _flatten(x[0], f"{path}[i]", out, depth + 1)
+        else:
+            out.append(f"{path}=[{len(x)} items]")
+    else:
+        out.append(f"{path}={str(x)[:24]}")
 
 
 def _schema(fn):

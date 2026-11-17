@@ -15,6 +15,7 @@ VERSION = re.compile(r"""["'](?:v|V)?\d+\.\d+(?:\.\d+)+(?:[-+.~]\w+)*["']""")
 RUN_NAME = re.compile(r"""\brun\(\s*["']([\w-]+)["']""")
 SKIP = re.compile(r"pytest\.skip\(|mark\.skip\b|mark\.skipif\b|importorskip\(")
 XFAIL = re.compile(r"\bxfail\b")
+FIELD = re.compile(r"""\[\s*["']([A-Za-z_][\w]*)["']\s*\]|\.get\(\s*["']([A-Za-z_][\w]*)["']""")
 CMD_KEY = re.compile(r"""^\s*["']([\w-]+)["']\s*:\s*["']""", re.M)
 
 
@@ -24,6 +25,7 @@ class Report:
     new_commands: list = field(default_factory=list)   # catalog additions: the recording must be re-captured
     new_tests: list = field(default_factory=list)
     files: list = field(default_factory=list)
+    unknown_fields: list = field(default_factory=list)
 
     @property
     def ok(self):
@@ -58,6 +60,22 @@ def parse_diff(text: str) -> dict:
     return files
 
 
+def _yaml_keys(text: str) -> set:
+    import yaml
+    out = set()
+
+    def walk(x):
+        if isinstance(x, dict):
+            for k, v in x.items():
+                out.add(str(k))
+                walk(v)
+    try:
+        walk(yaml.safe_load(text) or {})
+    except yaml.YAMLError:
+        pass
+    return out
+
+
 def changed_expectations(old_text: str, new_text: str) -> list:
     """Keys of a platform YAML whose value changed or vanished (new keys are fine). Formatting and comments ignored."""
     import yaml
@@ -80,9 +98,11 @@ def changed_expectations(old_text: str, new_text: str) -> list:
     return out
 
 
-def check(diff_text: str, cfg: dict, catalog_text: str, protected, versions=None) -> Report:
+def check(diff_text: str, cfg: dict, catalog_text: str, protected, versions=None, known_fields=None) -> Report:
     """protected: callable(path) -> bool (Workspace.protected).
-    versions: optional callable(path) -> (old_text, new_text), used to compare platform YAML by value."""
+    versions: optional callable(path) -> (old_text, new_text), used to compare platform YAML by value.
+    known_fields: optional set of every key in the recording and the platform config; a test that reads a field
+    no recording has (and adds no new command to get it) checks invented data: it can never fail."""
     rep = Report()
     files = parse_diff(diff_text)
     rep.files = sorted(files)
@@ -114,6 +134,11 @@ def check(diff_text: str, cfg: dict, catalog_text: str, protected, versions=None
                         f"with tools/capture.py'. If the check depends on the hardware layout (sockets, NUMA nodes, "
                         f"GPU count), put the expected value in config/platforms/<platform>.yaml as a NEW key and "
                         f"assert against it instead of skipping (rule 4)")
+            if known_fields is not None and path.startswith("tests/") and not path.endswith("test_checks_catch.py"):
+                for m in FIELD.finditer(text):
+                    key = m.group(1) or m.group(2)
+                    if key not in known_fields:
+                        rep.unknown_fields.append((where, key))
             if path.startswith("tests/") and re.match(r"\s*def (test_\w+)", text):
                 rep.new_tests.append(f"{path}::{re.match(r'\s*def (test_\w+)', text).group(1)}")
         if path.startswith("tests/") and not ch["new"]:
@@ -135,4 +160,10 @@ def check(diff_text: str, cfg: dict, catalog_text: str, protected, versions=None
             rep.new_commands += sorted(after - before)
             for gone in sorted(before - after):
                 rep.problems.append(f"gpuval/commands.py: command '{gone}' removed or renamed")
+    if rep.unknown_fields and not rep.new_commands:
+        for where, key in rep.unknown_fields:
+            rep.problems.append(f"{where}: field '{key}' does not exist in the recording (see the recorded data "
+                                f"list). A check on a missing field can never fail. Use a field the recording has, "
+                                f"or add a read-only command that returns this data (then the test skips until a "
+                                f"re-capture)")
     return rep

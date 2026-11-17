@@ -65,11 +65,10 @@ class State(TypedDict, total=False):
     versions: dict
     recipes: list          # closest previously approved plans (procedural memory)
     recipe_saved: str
-    # set and read only by the orchestrator's prepare step when this graph runs inside it (Phase 6)
+    # Phase 6 orchestrator modes (unset when the planner runs on its own):
     run_id: str
-    expect: dict
-    exceptions: list
-    exception_decision: dict
+    stop_after_approval: bool   # plan + approval only; status APPROVED, nothing runs (the orchestrator's PLANNING)
+    approved_plan: dict         # run this plan, approved earlier for all nodes: no planning, no approval interrupt
 
 
 def template(platform: str) -> dict:
@@ -142,11 +141,9 @@ def verdict_of(analysis: str) -> str:
 # ------------------------------------------------------------------ graph
 
 def build_graph(tools: dict, planner_model, writer_model, checkpointer, poll_s: float = POLL_S,
-                recipes: RecipeStore = None, prepare=None):
+                recipes: RecipeStore = None):
     """tools: name -> async callable(**kwargs) -> str (the guarded agfhc MCP tools).
-    recipes: procedural memory (default: files under state/recipes, no semantic index).
-    prepare: optional node run after approval and before the first test starts (the orchestrator's PREPARING step,
-    e.g. readiness/firmware exceptions). It returns a state update; a status other than EXECUTING stops the run."""
+    recipes: procedural memory (default: files under state/recipes, no semantic index)."""
     recipes = recipes or RecipeStore()
 
     async def call(name, **kw):
@@ -287,7 +284,9 @@ def build_graph(tools: dict, planner_model, writer_model, checkpointer, poll_s: 
         status = "FAILED" if failed else "DONE"
         saved = ""
         executed = len(ran) == len(state["plan"]["steps"]) and all(r["verdict"] in ("PASS", "FAIL") for r in ran)
-        if executed:     # the plan was approved and every step ran and archived: a reusable procedure
+        if executed and not state.get("approved_plan"):
+            # the plan was approved and every step ran and archived: a reusable procedure. In an orchestrated
+            # multi-node run the orchestrator saves it once, not once per node.
             v = state.get("versions") or {}
             rec = recipes.save(platform=state["platform"], bkc=str(v.get("System BIOS") or "unknown"),
                                requirements=state["requirements"], plan=state["plan"], results=ran,
@@ -304,15 +303,24 @@ def build_graph(tools: dict, planner_model, writer_model, checkpointer, poll_s: 
     for name, fn in [("preflight", preflight), ("plan", plan_node), ("approve", approve), ("execute", execute),
                      ("verify", verify), ("replan", replan), ("report", report)]:
         g.add_node(name, fn)
-    after_approve = "execute"
-    if prepare is not None:
-        g.add_node("prepare", prepare)
-        g.add_conditional_edges("prepare", lambda s: "execute" if s.get("status") == "EXECUTING" else END)
-        after_approve = "prepare"
+    def use_approved(state: State):
+        """Orchestrated run: the plan was approved once for every node. It must still fit this node's template."""
+        plan = state["approved_plan"]
+        why = validate_plan(plan, template(state["platform"]), state["requirements"])
+        if why:
+            return {"status": "REFUSED", "plan": plan, "report": f"approved plan does not fit {state['node']}: {why}"}
+        return {"plan": plan, "status": "EXECUTING"}
+
+    g.add_node("use_approved", use_approved)
     g.add_edge(START, "preflight")
-    g.add_conditional_edges("preflight", lambda s: END if s.get("status") == "REFUSED" else "plan")
+    g.add_conditional_edges("preflight", lambda s: END if s.get("status") == "REFUSED" else
+                            ("use_approved" if s.get("approved_plan") else "plan"))
+    g.add_conditional_edges("use_approved", lambda s: "execute" if s.get("status") == "EXECUTING" else END)
     g.add_conditional_edges("plan", lambda s: END if s.get("status") == "FAILED" else "approve")
-    g.add_conditional_edges("approve", lambda s: after_approve if s.get("status") == "EXECUTING" else END)
+    g.add_conditional_edges("approve", lambda s: END if s.get("status") != "EXECUTING" else
+                            ("approved" if s.get("stop_after_approval") else "execute"))
+    g.add_node("approved", lambda s: {"status": "APPROVED"})
+    g.add_edge("approved", END)
     g.add_edge("execute", "verify")
     g.add_edge("report", END)
     return g.compile(checkpointer=checkpointer)

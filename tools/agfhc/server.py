@@ -57,8 +57,20 @@ def _config() -> dict:
 def _nodes() -> dict:
     nodes = dict(_config().get("nodes") or {})
     if MODE == "dryrun":
-        nodes["sim"] = {"ssh_host": "localhost", "ssh_user": getpass.getuser(), "platform": "mi325x", "sim": True}
+        for name in _sim_names():
+            nodes[name] = {"ssh_host": "localhost", "ssh_user": getpass.getuser(), "platform": "mi325x", "sim": True}
     return nodes
+
+
+def _sim_names() -> list:
+    """Simulated nodes in dry-run: 'sim', plus any listed in SIM_NODES (e.g. "sim,sim2,sim3,sim4") so the
+    orchestrator's multi-node runs can be tested. Each has its own run root, logs and archive."""
+    extra = [n.strip() for n in os.environ.get("SIM_NODES", "").split(",") if n.strip()]
+    return ["sim"] + [n for n in extra if n != "sim" and re.fullmatch(r"sim\d{1,2}", n)]
+
+
+def _sim_dir(name: str) -> Path:
+    return SIM_DIR if name == "sim" else SIM_DIR / name
 
 
 def _node(name: str) -> dict:
@@ -72,7 +84,7 @@ def _runnable(name: str) -> str:
     """'' if AGFHC may run on this node in the current mode, else the reason."""
     n = _node(name)
     if MODE == "dryrun":
-        return "" if n.get("sim") else (f"dry-run mode: only the simulated node 'sim' can run AGFHC "
+        return "" if n.get("sim") else (f"dry-run mode: only simulated nodes ({', '.join(_sim_names())}) can run AGFHC "
                                          f"('{name}' is a real machine)")
     if MODE != "live":
         return f"unknown AGFHC_MODE '{MODE}'"
@@ -86,7 +98,7 @@ def _runnable(name: str) -> str:
 def _run_root(name: str) -> str:
     n = _node(name)
     if n.get("sim"):
-        return str(SIM_DIR / "agfhc-runs")
+        return str(_sim_dir(name) / "agfhc-runs")
     return _template(n.get("platform", "mi325x"))["agfhc"].get("run_root", L.RUN_ROOT).rstrip("/")
 
 
@@ -95,7 +107,7 @@ def _agfhc(name: str) -> dict:
     n = _node(name)
     a = dict(_template(n.get("platform", "mi325x"))["agfhc"])
     if n.get("sim"):
-        a.update(bin=str(ROOT / "sim/bin/agfhc"), log_root=str(SIM_DIR / "rootlog"), sudo="")
+        a.update(bin=str(ROOT / "sim/bin/agfhc"), log_root=str(_sim_dir(name) / "rootlog"), sudo="")
     else:
         a["sudo"] = "sudo -n "
     return a
@@ -104,23 +116,26 @@ def _agfhc(name: str) -> dict:
 def _archive_target(name: str) -> dict:
     """{'node': archive node name, 'dir': base dir, 'address': for display}."""
     if _node(name).get("sim"):
-        return {"node": "sim", "dir": str(SIM_DIR / "archive"), "address": "localhost (dry-run)"}
+        return {"node": name, "dir": str(_sim_dir(name) / "archive"), "address": "localhost (dry-run)"}
     arch = _config().get("archive") or {}
     if not arch.get("node") or not arch.get("dir"):
         raise RuntimeError("live archiving needs `archive: {node: <name in nodes>, dir: /srv/nfs/logs}` in config/nodes.yaml")
     return {"node": arch["node"], "dir": arch["dir"].rstrip("/"), "address": _node(arch["node"]).get("ssh_host")}
 
 
-def _sim_env() -> dict:
+def _sim_env(name: str = "sim") -> dict:
     env = dict(os.environ)
     env.update(PATH=f"{ROOT / 'sim/bin'}:{env.get('PATH', '/usr/bin:/bin')}", SIM_DATA=os.environ.get("SIM_DATA") or str(ROOT / "sim/data"),
-               FAKE_ROOTLOG=str(SIM_DIR / "rootlog"), SIM_BIOS=os.environ.get("SIM_BIOS") or "SIM-BIOS-1.0")
+               FAKE_ROOTLOG=str(_sim_dir(name) / "rootlog"), SIM_BIOS=os.environ.get("SIM_BIOS") or "SIM-BIOS-1.0")
+    for k in ("SIM_SCENARIO", "SIM_GPU_BUSY", "SIM_BIOS"):      # per-node override, e.g. SIM_SCENARIO_sim3=fail
+        if f"{k}_{name}" in os.environ:
+            env[k] = os.environ[f"{k}_{name}"]
     return env
 
 
-def _sim_exports() -> str:
+def _sim_exports(name: str = "sim") -> str:
     """Exports written into run.sh so a run started inside an existing tmux server still sees the simulator."""
-    e = _sim_env()
+    e = _sim_env(name)
     keys = ("PATH", "SIM_DATA", "FAKE_ROOTLOG", "SIM_SCENARIO", "SIM_SLEEP", "SIM_GPU_BUSY", "SIM_BIOS")
     return "".join(f"export {k}={shlex.quote(e[k])}\n" for k in keys if k in e)
 
@@ -136,7 +151,7 @@ def _argv(name: str, script: str) -> list:
 
 
 def _exec(name: str, script: str, timeout: int = 120, stdin: bytes = None):
-    env = _sim_env() if _node(name).get("sim") else None
+    env = _sim_env(name) if _node(name).get("sim") else None
     try:
         p = subprocess.run(_argv(name, script), input=stdin, capture_output=True, timeout=timeout, env=env)
     except subprocess.TimeoutExpired:
@@ -147,9 +162,9 @@ def _exec(name: str, script: str, timeout: int = 120, stdin: bytes = None):
 def _stream_copy(src: str, src_cmd: str, dst: str, dst_cmd: str):
     """Pipe src_cmd's stdout (on src) into dst_cmd (on dst) through this host. Returns (src_rc, dst_rc, bytes, err)."""
     s = subprocess.Popen(_argv(src, src_cmd), stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                         env=_sim_env() if _node(src).get("sim") else None)
+                         env=_sim_env(src) if _node(src).get("sim") else None)
     d = subprocess.Popen(_argv(dst, dst_cmd), stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                         env=_sim_env() if _node(dst).get("sim") else None)
+                         env=_sim_env(dst) if _node(dst).get("sim") else None)
     total = 0
     while True:
         chunk = s.stdout.read(262144)
@@ -514,7 +529,7 @@ async def start_run(confirm_token: str) -> str:
     post = (f"{s}dmesg 2>/dev/null | grep -iwE '{L.DMESG_FILTER}' > dmesg_after.log\n"
             f'awk -v t0="$(cat start_uptime 2>/dev/null || echo 0)" {q(L.DMESG_NEW_AWK)} dmesg_after.log > dmesg_new.log\n'
             f"{_collect_logdir_sh(node)}\nrm -f {q(rr)}/.host.lock .lock\n")
-    run_sh = ("#!/bin/bash\n" + (_sim_exports() if n.get("sim") else "") + f"cd {q(d)} || exit 1\necho $$ > pid\n"
+    run_sh = ("#!/bin/bash\n" + (_sim_exports(node) if n.get("sim") else "") + f"cd {q(d)} || exit 1\necho $$ > pid\n"
               'if [ -n "$AGFHC_TMUX" ] && command -v script >/dev/null 2>&1; then\n'
               f"  script -q -f -e -c {q(cmd_str)} console.log\n  rc=$?\nelse\n  {cmd_str} > console.log 2>&1\n  rc=$?\nfi\n"
               "echo $rc > rc; date +%s > end_epoch\n" + post)

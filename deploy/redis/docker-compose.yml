@@ -1,8 +1,9 @@
 # Redis for the agents' control plane (Phase 6.2). nfs-server only: listens on 127.0.0.1, password required,
-# append-only file so queued work survives a restart.
+# append-only file so queued work survives a restart. Port 6380 by default: 6379 on nfs-server already belongs to
+# another service's Redis, which the agents must not share or touch.
 #   cp redis.env.example ~/Multi-Agents/secrets/redis.env   # set REDIS_PASSWORD (chmod 600)
 #   docker compose --env-file ~/Multi-Agents/secrets/redis.env up -d
-# then in agents.env:  REDIS_URL=redis://:<password>@127.0.0.1:6379/0
+# then in agents.env:  REDIS_URL=redis://:<password>@127.0.0.1:6380/0
 services:
   redis:
     image: redis:7.4-alpine
@@ -12,7 +13,7 @@ services:
               "--appendfsync", "everysec", "--maxmemory", "512mb", "--maxmemory-policy", "noeviction",
               "--rename-command", "FLUSHALL", "", "--rename-command", "FLUSHDB", "", "--rename-command", "CONFIG", ""]
     ports:
-      - "127.0.0.1:6379:6379"
+      - "127.0.0.1:${AGENTS_REDIS_PORT:-6380}:6379"
     volumes:
       - agents-redis:/data
     healthcheck:

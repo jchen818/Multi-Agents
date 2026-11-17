@@ -90,7 +90,7 @@ def connect(url: str = None):
     url = url or os.environ.get("REDIS_URL")
     if not url:
         raise RuntimeError("REDIS_URL is not set (agents.env); see deploy/redis/")
-    return redis.from_url(url, decode_responses=True)
+    return redis.from_url(url, decode_responses=True, socket_connect_timeout=5)
 
 
 class Bus:

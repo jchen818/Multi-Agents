@@ -133,7 +133,7 @@ def test_diff_checks(mini, files, expect):
 
 def test_recorded_data_index(mini):
     text, keys = Workspace(mini, CFG).recorded_data()
-    assert "vram.size=262128 MB" in text and "gpu_count: text: 8" in text and "size" in keys
+    assert "vram.size={value: 262128, unit: MB}" in text and "gpu_count: text: 8" in text and "size" in keys
 
 
 def test_new_catalog_command_is_reported(mini):

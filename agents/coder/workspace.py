@@ -239,8 +239,8 @@ def _leaves(doc, seen: set, real: set):
 
 def _flatten(x, path, out, depth=0):
     if isinstance(x, dict) and depth < 6:
-        if set(x) == {"value", "unit"}:
-            out.append(f"{path}={x['value']} {x['unit']}")
+        if set(x) == {"value", "unit"}:           # shown as the dict it is: tests read ["value"] / ["unit"]
+            out.append(f"{path}={{value: {x['value']}, unit: {x['unit']}}}")
             return
         for k, v in x.items():
             _flatten(v, f"{path}.{k}" if path else str(k), out, depth + 1)

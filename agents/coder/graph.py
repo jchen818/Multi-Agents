@@ -334,6 +334,11 @@ def confirm(prompt: str) -> bool:
     if not sys.stdin.isatty():
         print("not a terminal: not pushing (run it yourself to confirm)")
         return False
+    try:
+        import termios
+        termios.tcflush(sys.stdin, termios.TCIFLUSH)    # drop lines typed or pasted ahead: only a fresh answer counts
+    except Exception:
+        pass
     return input(prompt).strip().lower() == "yes"
 
 
@@ -408,6 +413,8 @@ async def main():
             pr = repo.github.open_pr(branch, cfg.get("base", "main"), title, body, draft=bool(state.get("findings")))
             record.update(commit=sha, pr=pr.get("html_url"))
             print(f"pushed {branch} {sha[:9]}\npull request: {pr.get('html_url')}")
+        else:
+            print(f"not pushed (answer was not 'yes'). The worktree is kept: {path}")
     if state.get("outcome") == "gave_up":
         print(last_feedback(state))
     (STATE / "runs").mkdir(parents=True, exist_ok=True)

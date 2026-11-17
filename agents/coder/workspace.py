@@ -148,6 +148,19 @@ class Workspace:
         text = "\n".join(lines)
         return (text[:limit] + "\n[... truncated ...]" if len(text) > limit else text), keys
 
+    def na_fields(self) -> set:
+        """Keys whose value is N/A (or empty) everywhere in the newest recording: data this platform does not report.
+        A check on such a field can never fail here."""
+        rec = self.newest_recording()
+        seen, real = set(), set()
+        for f in sorted((rec / "out").glob("*.txt")) if rec else []:
+            try:
+                doc = json.loads(f.read_text(errors="replace"))
+            except ValueError:
+                continue
+            _leaves(doc, seen, real)
+        return seen - real
+
     def versions(self, rel: str) -> tuple:
         """(text at the base commit, text now) of one file; '' when it does not exist."""
         r = subprocess.run(["git", "-C", str(self.root), "show", f"HEAD:{rel}"], capture_output=True, text=True)
@@ -203,6 +216,25 @@ def _keys(doc, out: set):
     elif isinstance(doc, list):
         for v in doc:
             _keys(v, out)
+
+
+NA = ("N/A", "n/a", "NA", "", None)
+
+
+def _leaves(doc, seen: set, real: set):
+    """seen: every leaf key; real: leaf keys with at least one value that is not N/A."""
+    if isinstance(doc, dict):
+        for k, v in doc.items():
+            if isinstance(v, (dict, list)):
+                real.add(str(k))                  # e.g. ppt0.socket_power_limit = {value, unit}: real data
+                _leaves(v, seen, real)
+            else:
+                seen.add(str(k))
+                if v not in NA:
+                    real.add(str(k))
+    elif isinstance(doc, list):
+        for v in doc:
+            _leaves(v, seen, real)
 
 
 def _flatten(x, path, out, depth=0):

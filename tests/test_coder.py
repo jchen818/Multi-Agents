@@ -28,7 +28,9 @@ MINI = {
     "conftest.py": "",
     "recordings/r1/out/gpu_count.txt": "8\n",
     "recordings/r1/index.json": "{}\n",
-    "recordings/r1/out/amdsmi_static.txt": '{"gpu_data": [{"gpu": 0, "vram": {"size": {"value": 262128, "unit": "MB"}}}]}',
+    "recordings/r1/out/amdsmi_static.txt": '{"gpu_data": [{"gpu": 0, "vram": {"size": {"value": 262128, "unit": "MB"}},'
+                                           ' "ras": {"bad_page_threshold_exceeded": "N/A", "eeprom_version": "0x30000"},'
+                                           ' "limit": {"ppt0": {"cap": {"value": 1000, "unit": "W"}}, "ppt1": {"cap": "N/A"}}}]}',
     "tests/__init__.py": "",
     "tests/test_basic.py": "def test_basic():\n    assert 8 == 8\n",
     "tests/test_checks_catch.py": "def test_catch_basic():\n    assert True\n",
@@ -94,7 +96,7 @@ def run_checks(mini, files):
     ws = Workspace(mini, CFG)
     from agents.coder.graph import known_fields
     return checks.check(diff_of(mini, files), CFG, (mini / "gpuval/commands.py").read_text(), ws.protected,
-                        versions=ws.versions, known_fields=known_fields(ws))
+                        versions=ws.versions, known_fields=known_fields(ws), na_fields=ws.na_fields())
 
 
 @pytest.mark.parametrize("files,expect", [
@@ -115,6 +117,10 @@ def run_checks(mini, files):
     ({"tests/test_x.py": 'def test_x(static, platform):\n    assert all(g["vram"]["size"]["value"] == platform["gpu_count"] for g in static)\n'}, None),
     ({"tests/test_x.py": 'def test_x(static):\n    assert all(g["ras"].get("total_retired_pages", 0) == 0 for g in static)\n'},
      "field 'total_retired_pages' does not exist"),
+    ({"tests/test_x.py": 'def test_x(static):\n    assert all(g["ras"]["bad_page_threshold_exceeded"] != "ENABLED" for g in static)\n'},
+     "is N/A on every GPU"),
+    ({"tests/test_x.py": 'def test_x(static):\n    assert {g["ras"]["eeprom_version"] for g in static}\n'}, None),
+    ({"tests/test_x.py": 'def test_x(static):\n    assert {g["limit"]["ppt0"]["cap"]["value"] for g in static}\n'}, None),
     ({"conftest.py": "x = 1\n"}, "protected path"),
 ])
 def test_diff_checks(mini, files, expect):

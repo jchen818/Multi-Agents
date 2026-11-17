@@ -169,7 +169,7 @@ def build_graph(model, ws: Workspace, cfg: dict, agent_factory=None):
         problems = []
         d = diff(ws.root)
         rep = checks.check(d, cfg, ws.read_file("gpuval/commands.py"), ws.protected, versions=ws.versions,
-                           known_fields=known_fields(ws))
+                           known_fields=known_fields(ws), na_fields=ws.na_fields())
         problems += rep.problems
         if d.strip() == "(no changes)":
             said = " ".join((state.get("summary") or "").split())[:300]

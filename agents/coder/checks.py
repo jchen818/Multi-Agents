@@ -26,6 +26,7 @@ class Report:
     new_tests: list = field(default_factory=list)
     files: list = field(default_factory=list)
     unknown_fields: list = field(default_factory=list)
+    na_fields: list = field(default_factory=list)
 
     @property
     def ok(self):
@@ -98,11 +99,14 @@ def changed_expectations(old_text: str, new_text: str) -> list:
     return out
 
 
-def check(diff_text: str, cfg: dict, catalog_text: str, protected, versions=None, known_fields=None) -> Report:
+def check(diff_text: str, cfg: dict, catalog_text: str, protected, versions=None, known_fields=None,
+          na_fields=None) -> Report:
     """protected: callable(path) -> bool (Workspace.protected).
     versions: optional callable(path) -> (old_text, new_text), used to compare platform YAML by value.
     known_fields: optional set of every key in the recording and the platform config; a test that reads a field
-    no recording has (and adds no new command to get it) checks invented data: it can never fail."""
+    no recording has (and adds no new command to get it) checks invented data: it can never fail.
+    na_fields: optional set of keys that are N/A on every GPU in the recording (not reported by this platform);
+    a check on one can never fail here either."""
     rep = Report()
     files = parse_diff(diff_text)
     rep.files = sorted(files)
@@ -139,6 +143,8 @@ def check(diff_text: str, cfg: dict, catalog_text: str, protected, versions=None
                     key = m.group(1) or m.group(2)
                     if key not in known_fields:
                         rep.unknown_fields.append((where, key))
+                    elif na_fields and key in na_fields:
+                        rep.na_fields.append((where, key))
             if path.startswith("tests/") and re.match(r"\s*def (test_\w+)", text):
                 rep.new_tests.append(f"{path}::{re.match(r'\s*def (test_\w+)', text).group(1)}")
         if path.startswith("tests/") and not ch["new"]:
@@ -172,4 +178,9 @@ def check(diff_text: str, cfg: dict, catalog_text: str, protected, versions=None
                                 f"list). A check on a missing field can never fail. Use a field the recording has, "
                                 f"or add a read-only command that returns this data (then the test skips until a "
                                 f"re-capture)")
+    if rep.na_fields and not rep.new_commands:
+        for where, key in rep.na_fields:
+            rep.problems.append(f"{where}: field '{key}' is N/A on every GPU in the recording: this platform does "
+                                f"not report it, so a check on it can never fail here. Get the data with a "
+                                f"read-only catalog command instead (the test then skips until a re-capture)")
     return rep

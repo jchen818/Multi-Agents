@@ -151,6 +151,12 @@ def archive_of(analysis: str) -> str:
     return path.rstrip("/")
 
 
+def top_cause(c: dict) -> dict:
+    """One ranked triage candidate ({hyp: {category, cause}, score, ...}) as {category, cause, score}."""
+    h = c.get("hyp") or {}
+    return {"category": h.get("category"), "cause": h.get("cause"), "score": round(float(c.get("score") or 0), 2)}
+
+
 def run_markdown(state: dict) -> str:
     lines = [f"# Validation run {state['run_id']}", "",
              f"- Node: {state.get('node')} ({'dry-run' if state.get('dryrun', True) else 'live'})",
@@ -171,7 +177,9 @@ def run_markdown(state: dict) -> str:
                 lines.append(f"Triage not run: {t['error']}")
                 continue
             for i, r in enumerate(t["top"], 1):
-                lines.append(f"{i}. **{r['category']}**: {r['cause']} (confidence {r.get('confidence', '?')})")
+                lines.append(f"{i}. **{r['category']}**: {r['cause']} (score {r.get('score', '?')})")
+            if not t["top"]:
+                lines.append("No cause survived verification; see the full triage for the dropped candidates.")
             if t.get("draft_summary"):
                 lines.append(f"\nBug draft (not filed): *{t['draft_summary']}*\n"
                              f"To file it: `.venv/bin/python -m agents.triage.file draft {t['archive']} --severity <sev>`"
@@ -228,8 +236,7 @@ def build_graph(planner_graph_factory, triage_run=None, checkpointer=None, home:
             else:
                 try:
                     t = await triage_run(arch)
-                    item["top"] = [{k: c.get(k) for k in ("category", "cause", "confidence")}
-                                   for c in (t.get("ranked") or [])[:3]]
+                    item["top"] = [top_cause(c) for c in (t.get("ranked") or [])[:3]]
                     item["draft_summary"] = (t.get("draft") or {}).get("summary", "")
                     item["saved"] = t.get("_saved", "")
                 except Exception as e:
@@ -275,8 +282,8 @@ def ask(payload: dict) -> dict:
         pass
     import getpass
     who = getpass.getuser()
-    print("\n" + payload["markdown"])
-    if payload.get("kind") == "exceptions":
+    if payload.get("kind") == "exceptions":          # the planner's ask_decision prints its own plan
+        print("\n" + payload["markdown"])
         while True:
             a = input("\nproceed <reason> / abort <reason>: ").strip()
             if a.startswith("proceed "):

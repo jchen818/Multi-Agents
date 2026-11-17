@@ -59,8 +59,8 @@ def test_failed_run_goes_to_analysis(env, tmp_path, monkeypatch):
 
     async def fake_triage(archive):
         seen_archives.append(archive)
-        return {"ranked": [{"category": "environment/node state", "cause": "GPUs held by another process",
-                            "confidence": 0.8}],
+        return {"ranked": [{"hyp": {"category": "environment/node state", "cause": "GPUs held by another process"},
+                            "score": 0.8, "support_v": []}],
                 "draft": {"summary": "hbm test fails to allocate"}, "_saved": str(tmp_path / "t")}
     g = orchestrator(env, FakeModel(plans=[plan("all_lvl1")]), tmp_path, triage_run=fake_triage)
     audit = Audit("r2", tmp_path / "runs")
@@ -70,6 +70,7 @@ def test_failed_run_goes_to_analysis(env, tmp_path, monkeypatch):
     assert out["triage"][0]["top"][0]["category"] == "environment/node state"
     md = (audit.dir / "report.md").read_text()
     assert "Failure analysis" in md and "agents.triage.file draft" in md and "not filed" in md
+    assert "**environment/node state**: GPUs held by another process (score 0.8)" in md
     assert [e["event"] for e in audit.human_events()] == ["plan_decision"]
 
 

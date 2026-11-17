@@ -463,8 +463,10 @@ async def production_research(stack):
         return SimpleNamespace(search=lambda **kw: tools["search_web"].ainvoke(kw),
                                fetch=lambda **kw: tools["fetch_url"].ainvoke(kw))
     except Exception as e:
-        inner = getattr(e, "exceptions", None)          # anyio TaskGroup: show the real cause
-        why = "; ".join(f"{type(x).__name__}: {x}" for x in inner) if inner else f"{type(e).__name__}: {e}"
+        def leaves(x):                                    # anyio TaskGroups nest: show the real causes
+            subs = getattr(x, "exceptions", None)
+            return [y for s in subs for y in leaves(s)] if subs else [x]
+        why = "; ".join(f"{type(x).__name__}: {x}" for x in leaves(e))
         print(f"warning: web research unavailable ({why[:300]}); see logs/searxng-mcp.log")
         return None
 

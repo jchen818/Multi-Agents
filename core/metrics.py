@@ -3,7 +3,10 @@ mitacai. It reads Redis (queues, pending work, live workers, counters the worker
 switch) and the run/coder state files. Workers keep no HTTP server of their own. Read-only: it changes nothing.
 
     .venv/bin/python -m core.metrics --listen 10.46.252.118:9810      # or AGENTS_METRICS_LISTEN
-    curl -s http://10.46.252.118:9810/metrics
+    curl -s http://127.0.0.1:9810/metrics                              # only allowed clients get an answer
+
+nfs-server has no firewall, so the exporter itself answers only the addresses in AGENTS_METRICS_ALLOW (default:
+127.0.0.1 and the Prometheus host 10.46.252.115); everyone else gets 403.
 
 Prometheus rules: deploy/prometheus/agents-alerts.yml.
 """
@@ -124,11 +127,20 @@ def scrape(r, root: Path = ROOT) -> str:
     return render(samples)
 
 
-def serve(listen: str, r):
+def allowed_clients() -> set:
+    raw = os.environ.get("AGENTS_METRICS_ALLOW", "127.0.0.1,10.46.252.115")
+    return {a.strip() for a in raw.split(",") if a.strip()}
+
+
+def serve(listen: str, r, allow: set = None):
     host, port = listen.rsplit(":", 1)
+    allow = allow if allow is not None else allowed_clients()
 
     class H(BaseHTTPRequestHandler):
         def do_GET(self):
+            if self.client_address[0] not in allow:
+                self.send_error(403)
+                return
             if self.path.split("?")[0] != "/metrics":
                 self.send_error(404)
                 return
@@ -142,7 +154,7 @@ def serve(listen: str, r):
         def log_message(self, *a):
             pass
 
-    print(f"agents metrics on http://{listen}/metrics")
+    print(f"agents metrics on http://{listen}/metrics (allowed: {', '.join(sorted(allow))})")
     ThreadingHTTPServer((host, int(port)), H).serve_forever()
 
 

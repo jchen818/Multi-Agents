@@ -86,3 +86,32 @@ def test_alert_rules_use_exported_metrics():
             assert m in HELP, f"{r['alert']} uses {m}, which the exporter does not export"
     unit = (REPO / "deploy/systemd/agents-metrics.service").read_text()
     assert "core.metrics" in unit and "NoNewPrivileges=yes" in unit
+
+
+def test_only_allowed_clients_get_metrics():
+    import threading
+    import urllib.error
+    import urllib.request
+    import socket
+    from core import metrics as M
+    s = socket.socket()
+    s.bind(("127.0.0.1", 0))
+    port = s.getsockname()[1]
+    s.close()
+    r = fakeredis.FakeRedis(decode_responses=True)
+    threading.Thread(target=M.serve, args=(f"127.0.0.1:{port}", r, {"10.46.252.115"}), daemon=True).start()
+    import time as _t
+    _t.sleep(0.3)
+    try:
+        urllib.request.urlopen(f"http://127.0.0.1:{port}/metrics", timeout=3)
+        raise AssertionError("an address outside the allow list got metrics")
+    except urllib.error.HTTPError as e:
+        assert e.code == 403
+    s2 = socket.socket()
+    s2.bind(("127.0.0.1", 0))
+    port2 = s2.getsockname()[1]
+    s2.close()
+    threading.Thread(target=M.serve, args=(f"127.0.0.1:{port2}", r, {"127.0.0.1"}), daemon=True).start()
+    _t.sleep(0.3)
+    body = urllib.request.urlopen(f"http://127.0.0.1:{port2}/metrics", timeout=3).read().decode()
+    assert "agents_scrape_error 0" in body

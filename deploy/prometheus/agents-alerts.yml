@@ -1,0 +1,78 @@
+# Alert rules for the Multi-Agents workers (Phase 6.4). Load on the Prometheus on mitacai:
+#   rule_files: [ "/etc/prometheus/rules/agents-alerts.yml" ]
+# and scrape the exporter on nfs-server (deploy/prometheus/scrape-agents.yml).
+groups:
+  - name: multi-agents
+    rules:
+      - alert: AgentsExporterDown
+        expr: up{job="agents"} == 0
+        for: 5m
+        labels: {severity: warning}
+        annotations:
+          summary: "Agents metrics exporter on nfs-server is not answering"
+          description: "systemctl status agents-metrics on nfs-server; the other agent alerts are blind meanwhile."
+
+      - alert: AgentsRedisUnreachable
+        expr: agents_scrape_error == 1
+        for: 5m
+        labels: {severity: critical}
+        annotations:
+          summary: "The agents' Redis (127.0.0.1:6380 on nfs-server) is unreachable"
+          description: "Workers cannot take work. docker ps | grep agents-redis; docker logs agents-redis."
+
+      - alert: AgentWorkerDown
+        expr: agents_up{agent=~"triage|coder"} == 0
+        for: 5m
+        labels: {severity: warning}
+        annotations:
+          summary: "No {{ $labels.agent }} worker is running"
+          description: "systemctl status 'agents-{{ $labels.agent }}-worker@*'; journalctl -u 'agents-{{ $labels.agent }}-worker@*' -n 50"
+
+      - alert: AgentQueueStuck
+        # pending longer than the agent's redelivery timeout (triage 45 min, coder 2 h): the worker is hung
+        expr: >
+          (agents_queue_oldest_pending_seconds{agent="triage"} > 2700)
+          or (agents_queue_oldest_pending_seconds{agent="coder"} > 7200)
+        for: 10m
+        labels: {severity: warning}
+        annotations:
+          summary: "{{ $labels.agent }} has had a message unacknowledged for {{ $value | humanizeDuration }}"
+          description: "The worker may be hung on one message. python -m core.bus status; journalctl -u 'agents-{{ $labels.agent }}-worker@*'"
+
+      - alert: AgentDeadLetters
+        expr: increase(agents_dead_letters_total[1h]) > 0
+        labels: {severity: warning}
+        annotations:
+          summary: "{{ $value | humanize }} message(s) went to agents:dead in the last hour"
+          description: "A message failed 3 times or was rejected as malformed. python -m core.bus dead 10"
+
+      - alert: AgentRetriesHigh
+        expr: increase(agents_messages_total{outcome="retry"}[1h]) > 5
+        labels: {severity: info}
+        annotations:
+          summary: "{{ $labels.agent }} retried {{ $value | humanize }} messages in the last hour"
+          description: "Often the model server (vLLM on mitacai) or SearXNG is down. journalctl -u 'agents-{{ $labels.agent }}-worker@*'"
+
+      - alert: AgentsKillSwitchOn
+        expr: agents_kill_switch == 1
+        for: 30m
+        labels: {severity: info}
+        annotations:
+          summary: "The agents' kill switch has been set for 30 minutes"
+          description: "Workers take no new work. Clear it with python -m core.bus kill off (and rm state/KILL) when done."
+
+      - alert: AgentRunStuck
+        # longer than the longest planned burn-in (24 h) plus margin; includes runs waiting for a decision
+        expr: agents_run_in_progress_oldest_seconds > 30 * 3600
+        labels: {severity: info}
+        annotations:
+          summary: "An orchestrator run has been in progress for {{ $value | humanizeDuration }}"
+          description: "It may be waiting for a plan or exception decision, or its process died. python -m agents.orchestrator.graph --list"
+
+      - alert: CoderChangeWaitingForReview
+        expr: agents_coder_ready_to_push > 0
+        for: 24h
+        labels: {severity: info}
+        annotations:
+          summary: "{{ $value }} prepared gpu-validation change(s) waiting for review for a day"
+          description: "python -m agents.coder.graph --list, then --push agent/<slug> or discard it."

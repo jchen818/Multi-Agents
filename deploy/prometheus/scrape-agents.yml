@@ -1,0 +1,6 @@
+# Add under scrape_configs: in the Prometheus config on mitacai (10.46.252.115).
+  - job_name: agents
+    scrape_interval: 30s
+    static_configs:
+      - targets: ["10.46.252.118:9810"]
+        labels: {nodename: nfs-server}

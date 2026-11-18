@@ -152,7 +152,23 @@ async def ensure_group(r, name: str):
             raise
 
 
+METRICS = "agents:metrics"        # hash: <agent>:<outcome> counts, <agent>:seconds_sum/_count, dead_total
+
+
+async def count(r, field: str, by: float = 1):
+    """Best-effort metric counter; never lets a metrics problem affect the work."""
+    try:
+        if isinstance(by, float):
+            await r.hincrbyfloat(METRICS, field, by)
+        else:
+            await r.hincrby(METRICS, field, by)
+    except Exception:
+        pass
+
+
 async def dead_letter(r, name: str, sid: str, fields: dict, reason: str):
+    await count(r, "dead_total")
+    await count(r, f"{name}:dead")
     await r.xadd(DEAD, {"stream": stream(name), "stream_id": sid, "reason": reason[:500],
                         "message": json.dumps(fields)[:8000], "ts": str(time.time())}, maxlen=MAXLEN, approximate=True)
     await r.xack(stream(name), name, sid)
@@ -176,6 +192,16 @@ class Worker:
         return int(p[0]["times_delivered"]) if p else 1
 
     async def handle(self, sid: str, fields: dict) -> str:
+        """Process one delivery and record its outcome and duration in agents:metrics."""
+        t0 = time.monotonic()
+        out = await self._handle(sid, fields)
+        if out != "dead":                      # dead letters are counted where they are written
+            await count(self.r, f"{self.name}:{out}")
+        await count(self.r, f"{self.name}:seconds_sum", round(time.monotonic() - t0, 3))
+        await count(self.r, f"{self.name}:seconds_count")
+        return out
+
+    async def _handle(self, sid: str, fields: dict) -> str:
         """Process one delivery. Returns 'done', 'dead' or 'retry'."""
         n = await self.deliveries(sid)
         if n > MAX_DELIVERIES:
@@ -198,7 +224,7 @@ class Worker:
         """Claim stale messages, then read new ones. Returns the number handled."""
         if await kill_set(self.r):
             return 0
-        await self.r.set(f"agents:{self.name}:alive:{self.consumer}", str(time.time()), ex=60)
+        await self.beat()
         handled = 0
         _, claimed, *_ = await self.r.xautoclaim(stream(self.name), self.name, self.consumer,
                                                  min_idle_time=self.visibility_ms, start_id="0-0", count=5)
@@ -214,9 +240,32 @@ class Worker:
                 handled += 1
         return handled
 
+    async def beat(self):
+        try:
+            await self.r.set(f"agents:{self.name}:alive:{self.consumer}", str(time.time()), ex=60)
+        except Exception:
+            pass
+
+    async def _heartbeat(self):
+        """Keeps the worker visible as alive while one message takes minutes (triage) or an hour (coder)."""
+        while True:
+            await self.beat()
+            await asyncio.sleep(20)
+
     async def run(self, stop: asyncio.Event = None):
         await ensure_group(self.r, self.name)
         self.log(f"{self.name} worker {self.consumer} reading {stream(self.name)}")
+        hb = asyncio.create_task(self._heartbeat())
+        try:
+            await self._loop(stop)
+        finally:
+            hb.cancel()
+            try:
+                await self.r.delete(f"agents:{self.name}:alive:{self.consumer}")
+            except Exception:
+                pass
+
+    async def _loop(self, stop):
         while not (stop and stop.is_set()):
             if await kill_set(self.r):
                 await asyncio.sleep(5)

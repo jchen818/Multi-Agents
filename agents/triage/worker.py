@@ -21,8 +21,8 @@ ROOT = Path(__file__).resolve().parents[2]
 
 
 def summary_note(state: dict) -> str:
-    top = [{"category": c["hyp"]["category"], "cause": c["hyp"]["cause"], "score": round(float(c.get("score") or 0), 2)}
-           for c in (state.get("ranked") or [])[:3]]
+    from agents.orchestrator.graph import top_cause
+    top = [top_cause(c) for c in (state.get("ranked") or [])[:3]]
     return json.dumps({"top": top, "draft_summary": (state.get("draft") or {}).get("summary", "")})[:3900]
 
 

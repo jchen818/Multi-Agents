@@ -21,7 +21,7 @@ def orchestrator(env, model, tmp_path, triage_run=None):
         return _text(await env["tools"]["preflight"](node=node))
     return build_graph(lambda: planner_graph(env["tools"], model, model, None, poll_s=0.5, recipes=env["store"]),
                        preflight, triage_run=triage_run, recipes=env["store"], checkpointer=InMemorySaver(),
-                       home=tmp_path / "runs")
+                       home=tmp_path / "runs", tasks_dir=tmp_path / "tasks")
 
 
 def drive(graph, first, decisions, audit):
@@ -75,6 +75,9 @@ def test_failed_run_goes_to_analysis(env, tmp_path, monkeypatch):
     assert "Failure analysis" in md and "agents.triage.file draft" in md and "not filed" in md
     assert "**environment/node state**: GPUs held by another process (score 0.8)" in md
     assert "### sim: `all_lvl1`" in md
+    (task,) = out["handoffs"]                                                   # node state is detectable
+    assert task["category"] == "environment/node state" and not task["sent"]
+    assert "read-only check" in Path(task["task_file"]).read_text() and "--task-file" in md
     assert [e["event"] for e in audit.human_events()] == ["plan_decision"]
 
 
@@ -202,6 +205,16 @@ def test_a_node_that_cannot_run_stops_everything(env, tmp_path, monkeypatch):
     assert out["phase"] == "REJECTED" and not out.get("node_results")
     assert "nosuchnode cannot run AGFHC" in (audit.dir / "report.md").read_text()
     assert not (env["tmp"] / "sim" / "agfhc-runs").exists()
+
+
+def test_handoff_rules():
+    from agents.orchestrator.graph import handoff_items
+
+    def item(cat, score, node="n1"):
+        return {"node": node, "recipe": "r", "run_id": "x", "top": [{"category": cat, "cause": "c", "score": score}]}
+    picked = handoff_items([item("test tool/config defect", 0.9), item("hardware", 0.4), item("XGMI link", 0.7),
+                            item("XGMI link", 0.9, "n2"), {"error": "triage failed"}])
+    assert [(c["category"], it["node"]) for it, c in picked] == [("XGMI link", "n2")]
 
 
 def test_helpers():

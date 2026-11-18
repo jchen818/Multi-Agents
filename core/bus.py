@@ -39,9 +39,10 @@ RUN_RE = re.compile(r"[A-Za-z0-9._:-]{1,120}")
 ACCEPTS = {
     "triage": {"triage_request"},
     "orchestrator": {"triage_done", "triage_failed"},
+    "coder": {"coder_task"},          # prepares a change; never pushes (a person runs --push)
 }
 # how long a message may stay pending (worker busy or dead) before another worker claims it
-VISIBILITY_S = {"triage": 45 * 60, "orchestrator": 5 * 60}
+VISIBILITY_S = {"triage": 45 * 60, "orchestrator": 5 * 60, "coder": 120 * 60}
 
 
 def stream(name: str) -> str:

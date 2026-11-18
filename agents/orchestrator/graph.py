@@ -13,6 +13,10 @@ PREPARING                     preflight on every node; a node that cannot run AG
 EXECUTING                     one planner run per node, started together (LangGraph Send) with the pre-approved
                               plan; the run waits for every node (barrier) before going on.
 ANALYZING                     Phase 3 triage for every failed step on every node; bug drafts are never filed here.
+HAND-OFF                      a likely cause the gpu-validation suite could catch before AGFHC runs (node state,
+                              firmware, XGMI, hardware, thermal, driver; score >= 0.5) becomes a coder task: a task
+                              file, and with --bus a message to the coder worker, which prepares the change and
+                              stops before pushing. AGFHC tool/config defects stay with the bug draft.
 REPORTING                     state/runs/<run_id>/report.md + run.json; the recipe is saved once for the run.
 
 Two human decision points, both interrupts, both in the audit log: plan approval, readiness exceptions.
@@ -46,6 +50,11 @@ from core.guard import killed
 ROOT = Path(os.environ.get("MULTI_AGENTS_ROOT") or Path(__file__).resolve().parents[2])
 RUNS = ROOT / "state" / "runs"
 HUMAN_EVENTS = ("plan_decision", "exception_decision")
+TASKS = ROOT / "state" / "coder" / "tasks"
+# Causes the gpu-validation suite could catch before AGFHC runs (read-only checks): these become coder tasks.
+# AGFHC tool/config defects are not the suite's business: they stay with the bug draft for a person.
+DETECTABLE = {"environment/node state", "firmware/BKC", "XGMI link", "hardware", "thermal/power", "driver/ROCm"}
+HANDOFF_MIN_SCORE = 0.5
 
 
 class State(TypedDict, total=False):
@@ -58,6 +67,7 @@ class State(TypedDict, total=False):
     exception_decision: dict
     node_results: Annotated[list, operator.add]   # one entry per node, filled in parallel
     triage: list            # [{node, recipe, run_id, archive, top, draft_summary, saved}]
+    handoffs: list          # [{category, cause, node, recipe, task_file, sent}] - coder tasks from triage
     run_report: str
     recipe_saved: str
     # planner keys (the planner runs as a subgraph on this state for PLANNING, on the first node)
@@ -143,7 +153,9 @@ def archive_of(analysis: str) -> str:
 def top_cause(c: dict) -> dict:
     """One ranked triage candidate ({hyp: {category, cause}, score, ...}) as {category, cause, score}."""
     h = c.get("hyp") or {}
-    return {"category": h.get("category"), "cause": h.get("cause"), "score": round(float(c.get("score") or 0), 2)}
+    ev = [str(x.get("text", ""))[:200] for x in (c.get("support_v") or [])[:2]]
+    return {"category": h.get("category"), "cause": h.get("cause"), "score": round(float(c.get("score") or 0), 2),
+            "evidence": ev}
 
 
 
@@ -163,6 +175,30 @@ def can_run(preflight: str) -> tuple:
     if not (usage.startswith("all ") and "idle" in usage):
         return False, f"GPUs not idle: {usage}"
     return True, ""
+
+
+def coder_task(item: dict, cause: dict) -> str:
+    ev = "\n".join(f"  - {e}" for e in cause.get("evidence") or []) or "  - (see the triage report)"
+    return (f"Triage of AGFHC run {item['run_id']} on {item['node']} ({item['recipe']}) found a likely cause: "
+            f"[{cause['category']}] {cause['cause']}\nEvidence from the run's logs:\n{ev}\n\n"
+            "Add a read-only check to the gpu-validation suite that detects this condition on a node before stress "
+            "tests run, so it is caught early. Follow AGENTS.md: catalog commands only, no pinned versions, no node "
+            "names, a catch test that fails on tampered data. If the data the check needs is not in the recording, "
+            "add the read-only catalog command and skip until a re-capture. If an existing test already detects "
+            "this, change nothing and name that test.")
+
+
+def handoff_items(triage: list) -> list:
+    """One coder task per detectable cause category in this run: the best-scored failure for it."""
+    best = {}
+    for it in triage or []:
+        if it.get("error") or not it.get("top"):
+            continue
+        c = it["top"][0]
+        if c.get("category") in DETECTABLE and float(c.get("score") or 0) >= HANDOFF_MIN_SCORE:
+            if c["category"] not in best or c["score"] > best[c["category"]][1]["score"]:
+                best[c["category"]] = (it, c)
+    return [best[k] for k in sorted(best)]
 
 
 def run_markdown(state: dict) -> str:
@@ -209,13 +245,20 @@ def run_markdown(state: dict) -> str:
                              f"To file it: `.venv/bin/python -m agents.triage.file draft {t['archive']} --severity <sev>`"
                              f" then `create <token>` (a person files bugs).")
             lines.append(f"Full triage: `{t['saved']}/triage.md`")
+    if state.get("handoffs"):
+        lines += ["", "## Suggested suite checks (coding agent)"]
+        for h in state["handoffs"]:
+            how = ("queued for the coder worker; when it is ready, `python -m agents.coder.graph --list` shows it "
+                   "and `--push <branch>` sends it for review" if h.get("sent") else
+                   f"run `python -m agents.coder.graph --task-file {h['task_file']}`")
+            lines.append(f"- [{h['category']}] {h['cause']} (from {h['node']} `{h['recipe']}`): {how}")
     return "\n".join(lines)
 
 
 # ------------------------------------------------------------------ graph
 
 def build_graph(planner_factory, preflight, triage_run=None, recipes=None, checkpointer=None, home: Path = RUNS,
-                bus=None, triage_timeout_s: float = 3600):
+                bus=None, triage_timeout_s: float = 3600, tasks_dir: Path = TASKS):
     """planner_factory() -> compiled Phase 2 planner graph without a checkpointer (used as the PLANNING subgraph and,
     with a pre-approved plan, once per node). preflight(node) -> awaitable preflight text (the agfhc tool).
     triage_run(archive) -> awaitable triage state, or None to skip analysis. recipes: RecipeStore to save the plan.
@@ -403,13 +446,35 @@ def build_graph(planner_factory, preflight, triage_run=None, recipes=None, check
         return {"triage": items, "phase": "FAILED",
                 "dryrun": all(r.get("dryrun", True) for r in state.get("node_results") or [])}
 
+    async def handoff(state: State):
+        """Detectable causes become coder tasks: a task file, and with the bus a coder_task message. The coder
+        worker prepares the change and stops before pushing; a person reviews and pushes it."""
+        audit = audit_for(state)
+        out = []
+        for k, (it, c) in enumerate(handoff_items(state.get("triage")), 1):
+            tasks_dir.mkdir(parents=True, exist_ok=True)
+            f = tasks_dir / f"{state['run_id']}-{k}.md"
+            f.write_text(coder_task(it, c) + "\n")
+            h = {"category": c["category"], "cause": c["cause"], "node": it["node"], "recipe": it["recipe"],
+                 "task_file": str(f), "sent": False}
+            if bus is not None and not killed():
+                try:
+                    await bus.send("coder", "coder_task", state["run_id"], artifact_path=str(f),
+                                   note=f"{c['category']}: {c['cause']}"[:500], key=f"{state['run_id']}/coder/{k}")
+                    h["sent"] = True
+                except Exception as e:
+                    h["error"] = f"not sent: {e}"[:300]
+            audit.log("handoff", **h)
+            out.append(h)
+        return {"handoffs": out}
+
     def report(state: State):
         audit = audit_for(state)
         md = run_markdown(state)
         (audit.dir / "report.md").write_text(md)
         (audit.dir / "run.json").write_text(json.dumps(
             {k: state.get(k) for k in ("run_id", "phase", "nodes", "requirements", "expect", "plan", "readiness",
-                                       "exception_decision", "triage", "recipe_saved", "dryrun")}
+                                       "exception_decision", "triage", "handoffs", "recipe_saved", "dryrun")}
             | {"node_results": [{k: v for k, v in r.items() if k != "report"} for r in state.get("node_results") or []]},
             indent=1, default=str))
         audit.log("state", phase="REPORTING", outcome=state.get("phase"), report=str(audit.dir / "report.md"))
@@ -418,7 +483,7 @@ def build_graph(planner_factory, preflight, triage_run=None, recipes=None, check
     g = StateGraph(State)
     for name, fn in (("requested", requested), ("planning", planning), ("after_planning", after_planning),
                      ("prepare", prepare), ("fan_out", fan_out), ("node_run", node_run), ("collect", collect),
-                     ("analyze", analyze), ("report", report)):
+                     ("analyze", analyze), ("handoff", handoff), ("report", report)):
         g.add_node(name, fn)
     g.add_edge(START, "requested")
     g.add_conditional_edges("requested", lambda s: "report" if s.get("phase") == "STOPPED" else "planning",
@@ -426,7 +491,8 @@ def build_graph(planner_factory, preflight, triage_run=None, recipes=None, check
     g.add_edge("planning", "after_planning")
     g.add_conditional_edges("fan_out", branches, ["node_run"])
     g.add_edge("node_run", "collect")
-    g.add_edge("analyze", "report")
+    g.add_edge("analyze", "handoff")
+    g.add_edge("handoff", "report")
     g.add_edge("report", END)
     return g.compile(checkpointer=checkpointer)
 

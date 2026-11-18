@@ -190,16 +190,20 @@ def test_orchestrator_triage_over_the_bus(env, tmp_path, monkeypatch):
         worker = asyncio.create_task(w.run(stop))
         g = build_graph(lambda: planner_graph(env["tools"], m, m, None, poll_s=0.5, recipes=env["store"]),
                         preflight, recipes=env["store"], checkpointer=InMemorySaver(), home=tmp_path / "runs",
-                        bus=Bus(r, "orchestrator"), triage_timeout_s=30)
+                        bus=Bus(r, "orchestrator"), triage_timeout_s=30, tasks_dir=tmp_path / "tasks")
         cfg = {"configurable": {"thread_id": "rb"}, "recursion_limit": 200}
         out = await g.ainvoke(start("rb", nodes=("sim", "sim3")), cfg)
         while "__interrupt__" in out:
             out = await g.ainvoke(Command(resume={"action": "approve"}), cfg)
         stop.set()
         await worker
-        return out
-    out = run(go())
+        coder_msgs = await r.xrange(stream("coder"))
+        return out, coder_msgs
+    out, coder_msgs = run(go())
     assert out["phase"] == "FAILED"
+    (h,) = out["handoffs"]                                      # hardware is detectable: a coder task was queued
+    assert h["sent"] and h["category"] == "hardware"
+    assert coder_msgs[0][1]["type"] == "coder_task" and coder_msgs[0][1]["artifact_path"] == h["task_file"]
     (t,) = out["triage"]
     assert t["node"] == "sim3" and t["top"][0]["cause"] == "HBM ECC on GPU 5" and not t.get("error")
     assert [e["via"] for e in Audit("rb", tmp_path / "runs").events() if e["event"] == "triage"] == ["bus"]

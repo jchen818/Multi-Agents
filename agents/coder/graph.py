@@ -13,6 +13,7 @@ The CLI then shows the diff; after a typed "yes" it commits, pushes agent/<slug>
     .venv/bin/python -m agents.coder.graph "check that every GPU reports the same power cap"
     .venv/bin/python -m agents.coder.graph --task-file task.txt --no-push      # stop before pushing
     .venv/bin/python -m agents.coder.graph --list                              # worktrees and their state
+    .venv/bin/python -m agents.coder.graph --push agent/<slug>                 # push one the coder worker prepared
 """
 import argparse
 import asyncio
@@ -83,6 +84,9 @@ class Plan(BaseModel):
     data: str = Field("", description="which catalog commands / recorded outputs the check reads")
     files: list[str] = Field(default_factory=list, description="files to add or change")
     steps: list[str] = Field(default_factory=list)
+    already_covered: bool = Field(False, description="true if an existing test already detects exactly what the "
+                                                     "task asks for, so no change is needed")
+    covered_by: str = Field("", description="the existing test node id that already covers it")
 
 
 class Critique(BaseModel):
@@ -103,7 +107,7 @@ class State(TypedDict, total=False):
     critique: dict
     history: list         # per round: {"round", "stage", "problems"} - why each round was sent back
     critique_rounds: int
-    outcome: str          # ready | refused | gave_up | stopped
+    outcome: str          # ready | refused | covered | gave_up | stopped
     reason: str
     calls: int
 
@@ -138,6 +142,8 @@ def build_graph(model, ws: Workspace, cfg: dict, agent_factory=None):
             return {"outcome": "gave_up", "reason": "no plan from the model"}
         if p.refuse:
             return {"outcome": "refused", "reason": p.refuse_reason or "the task breaks AGENTS.md", "plan": p.model_dump()}
+        if p.already_covered and p.covered_by.strip():
+            return {"outcome": "covered", "reason": f"already covered by {p.covered_by.strip()}", "plan": p.model_dump()}
         return {"plan": p.model_dump(), "iteration": 0, "feedback": []}
 
     async def code(state):
@@ -346,7 +352,10 @@ def list_work(cfg):
     from agents.coder.gitops import STATE
     for p in sorted((STATE / "runs").glob("*.json")):
         r = json.loads(p.read_text())
-        print(f"{r.get('outcome', '?'):8} {r.get('branch', '')}  {r.get('pr', '') or r.get('reason', '')}")
+        src = r.get("source") or {}
+        tag = f" [from {src.get('run_id')}]" if src.get("run_id") else ""
+        nxt = (r.get("pr") or (f"ready: --push {r.get('branch')}" if r.get("outcome") == "ready" else r.get("reason", "")))
+        print(f"{r.get('outcome', '?'):8} {r.get('branch', '')}{tag}  {nxt}")
 
 
 def limit_model(model, cfg: dict):
@@ -354,7 +363,7 @@ def limit_model(model, cfg: dict):
     minutes per call. Cap the output length and the time per request (one retry)."""
     upd = {k: v for k, v in (("max_tokens", int(cfg.get("model_max_tokens", 8192))),
                              ("request_timeout", float(cfg.get("model_timeout_s", 300))),
-                             ("max_retries", 1)) if k in type(model).model_fields}
+                             ("max_retries", 1)) if k in getattr(type(model), "model_fields", {})}
     return model.model_copy(update=upd) if upd and hasattr(model, "model_copy") else model
 
 
@@ -376,49 +385,115 @@ async def run(task: str, cfg: dict, repo, model, runner=None):
     return state, branch, path
 
 
+def run_record(state: dict, task: str, branch: str, path, seconds: int, cfg: dict, source: dict = None) -> dict:
+    rec = {"task": task, "branch": branch, "path": str(path), "outcome": state.get("outcome"),
+           "reason": state.get("reason", ""), "rounds": state.get("iteration"), "report": state.get("report"),
+           "findings": state.get("findings"), "history": state.get("history"), "critique": state.get("critique"),
+           "seconds": seconds, "source": source or {}, "pushed": False}
+    if state.get("outcome") == "ready":
+        rec["title"], rec["body"] = pr_text({**state, "task": task}, cfg)
+    return rec
+
+
+def save_record(rec: dict) -> Path:
+    from agents.coder.gitops import STATE
+    d = STATE / "runs"
+    d.mkdir(parents=True, exist_ok=True)
+    p = d / f"{rec['branch'].split('/', 1)[1]}.json"
+    p.write_text(json.dumps(rec, indent=1, default=str))
+    return p
+
+
+def load_record(branch: str) -> tuple:
+    from agents.coder.gitops import STATE, check_branch
+    check_branch(branch)
+    p = STATE / "runs" / f"{branch.split('/', 1)[1]}.json"
+    if not p.exists():
+        raise SystemExit(f"no run record for {branch} ({p})")
+    return json.loads(p.read_text()), p
+
+
+def recheck(ws: Workspace, cfg: dict, findings: dict) -> list:
+    """The verify step again, just before a push: the worktree may have changed since the agent finished."""
+    rep = checks.check(diff(ws.root), cfg, ws.read_file("gpuval/commands.py"), ws.protected, versions=ws.versions,
+                       known_fields=known_fields(ws), na_fields=ws.na_fields())
+    tests = ws.runner(ws.root, cfg, [])
+    failed = [t for t in failed_tests(tests["output"]) if t not in (findings or {})]
+    problems = list(rep.problems) + [f"test fails: {t}" for t in failed]
+    if tests["rc"] not in (0, 1) or (tests["rc"] == 1 and not failed_tests(tests["output"])):
+        problems.append(f"pytest did not run cleanly (exit {tests['rc']})")
+    return problems
+
+
+async def push_prepared(branch: str, cfg: dict, repo=None, ask=None) -> dict:
+    """Push a change the coder worker prepared (outcome ready, not pushed): re-check, show, typed yes, push, PR."""
+    rec, path = load_record(branch)
+    if rec.get("outcome") != "ready":
+        raise SystemExit(f"{branch} is not ready to push (outcome {rec.get('outcome')}: {rec.get('reason', '')})")
+    if rec.get("pushed"):
+        raise SystemExit(f"{branch} was already pushed: {rec.get('pr')}")
+    ws = Workspace(Path(rec["path"]), cfg)
+    problems = recheck(ws, cfg, rec.get("findings"))
+    if problems:
+        raise SystemExit("not pushed; the change no longer passes its checks:\n- " + "\n- ".join(problems))
+    print(f"{diff(ws.root)}\n\nPR title: {rec['title']}\n\n{rec['body']}\n")
+    if not (ask or confirm)(f"Push {branch} and open a pull request to {cfg.get('base', 'main')}? Type 'yes': "):
+        print("not pushed")
+        return rec
+    if repo is None:
+        from agents.coder.gitops import Repo, load_token
+        repo = Repo(cfg, load_token())
+    sha = repo.commit(ws.root, rec["title"])
+    repo.push(ws.root, branch)
+    pr = repo.github.open_pr(branch, cfg.get("base", "main"), rec["title"], rec["body"], draft=bool(rec.get("findings")))
+    rec.update(commit=sha, pr=pr.get("html_url"), pushed=True)
+    path.write_text(json.dumps(rec, indent=1, default=str))
+    print(f"pushed {branch} {sha[:9]}\npull request: {pr.get('html_url')}")
+    return rec
+
+
 async def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("task", nargs="?")
     ap.add_argument("--task-file")
     ap.add_argument("--no-push", action="store_true", help="stop after the checks; leave the worktree")
+    ap.add_argument("--push", metavar="BRANCH", help="push a change the coder worker prepared (agent/...)")
     ap.add_argument("--list", action="store_true")
     args = ap.parse_args()
     cfg = load_cfg()
     if args.list:
         return list_work(cfg)
+    if args.push:
+        return await push_prepared(args.push, cfg)
     task = (Path(args.task_file).read_text() if args.task_file else args.task or "").strip()
     if not task:
         ap.error("give a task")
     if cfg.get("sandbox", {}).get("backend") != "docker":
         raise SystemExit("config/coder.yaml: sandbox.backend must be docker for real runs")
 
-    from agents.coder.gitops import Repo, STATE, load_token
+    from agents.coder.gitops import Repo, load_token
     from core.models import get_model
     repo = Repo(cfg, load_token())
     t0 = time.monotonic()
     state, branch, path = await run(task, cfg, repo, get_model("executor"))
-    record = {"task": task, "branch": branch, "path": str(path), "outcome": state.get("outcome"),
-              "reason": state.get("reason", ""), "rounds": state.get("iteration"),
-              "report": state.get("report"), "findings": state.get("findings"), "history": state.get("history"),
-              "critique": state.get("critique"), "seconds": int(time.monotonic() - t0)}
+    rec = run_record(state, task, branch, path, int(time.monotonic() - t0), cfg)
     print(f"\noutcome: {state.get('outcome')}  {state.get('reason', '')}  (rounds: {state.get('iteration')})")
     if state.get("outcome") == "ready":
-        title, body = pr_text(state, cfg)
-        print(f"\n{diff(path)}\n\nPR title: {title}\n\n{body}\n")
+        print(f"\n{diff(path)}\n\nPR title: {rec['title']}\n\n{rec['body']}\n")
         if args.no_push:
-            print("--no-push: nothing pushed. Worktree kept.")
+            print(f"--no-push: nothing pushed. Worktree kept. Push later: --push {branch}")
         elif confirm(f"Push {branch} and open a pull request to {cfg.get('base', 'main')}? Type 'yes': "):
-            sha = repo.commit(path, title)
+            sha = repo.commit(path, rec["title"])
             repo.push(path, branch)
-            pr = repo.github.open_pr(branch, cfg.get("base", "main"), title, body, draft=bool(state.get("findings")))
-            record.update(commit=sha, pr=pr.get("html_url"))
+            pr = repo.github.open_pr(branch, cfg.get("base", "main"), rec["title"], rec["body"],
+                                     draft=bool(state.get("findings")))
+            rec.update(commit=sha, pr=pr.get("html_url"), pushed=True)
             print(f"pushed {branch} {sha[:9]}\npull request: {pr.get('html_url')}")
         else:
-            print(f"not pushed (answer was not 'yes'). The worktree is kept: {path}")
+            print(f"not pushed (answer was not 'yes'). The worktree is kept: {path}. Push later: --push {branch}")
     if state.get("outcome") == "gave_up":
         print(last_feedback(state))
-    (STATE / "runs").mkdir(parents=True, exist_ok=True)
-    (STATE / "runs" / f"{branch.split('/', 1)[1]}.json").write_text(json.dumps(record, indent=1))
+    save_record(rec)
 
 
 if __name__ == "__main__":

@@ -1,5 +1,6 @@
 """Test-coding agent: the worktree jail, the AGENTS.md diff checks, the push guard, and the plan/code/verify loop."""
 import asyncio
+import json
 import subprocess
 import sys
 from pathlib import Path
@@ -394,3 +395,64 @@ def test_model_calls_are_bounded():
     from agents.coder.graph import limit_model
     m = limit_model(ChatOpenAI(model="x", base_url="http://h/v1", api_key="E"), CFG)
     assert (m.max_tokens, m.request_timeout, m.max_retries) == (CFG["model_max_tokens"], CFG["model_timeout_s"], 1)
+
+
+# ------------------------------------------------------------------ hand-off from triage (Phase 6)
+
+def test_already_covered_changes_nothing(mini):
+    p = Plan(refuse=False, already_covered=True, covered_by="tests/test_basic.py::test_basic")
+    s = run_graph(mini, p, [GOOD])
+    assert s["outcome"] == "covered" and "test_basic" in s["reason"]
+    assert git(mini, "status", "--porcelain") == ""
+
+
+def test_coder_worker_prepares_and_a_person_pushes(remote, tmp_path, monkeypatch):
+    import agents.coder.gitops as gitops
+    from agents.coder.graph import push_prepared, run as coder_run
+    from agents.coder.worker import make_handler
+    monkeypatch.setattr(gitops, "STATE", tmp_path / "coder")
+    gh = FakeGH(remote)
+    repo = Repo({**CFG, "repo": "o/r"}, "token", github=gh, home=tmp_path / "coder", url=str(remote))
+    task = tmp_path / "task.md"
+    task.write_text("Add a check for the GPU count")
+    main_before = git(remote, "rev-parse", "refs/heads/main")
+
+    async def run_task(text):
+        rounds = [GOOD]
+        import agents.coder.graph as cg
+        orig = cg.build_graph
+        cg.build_graph = lambda model, ws, cfg: orig(FakeModel(PLAN, [Critique(ok=True)]), ws, cfg,
+                                                     agent_factory=lambda m, w, c: ScriptedAgent(w, rounds))
+        try:
+            return await coder_run(text, CFG, repo, None)
+        finally:
+            cg.build_graph = orig
+
+    handler = make_handler(run_task, CFG, log=lambda *_: None)
+    asyncio.run(handler(None, {"artifact_path": str(task), "run_id": "run-9", "from": "orchestrator"}))
+    (rec_file,) = (tmp_path / "coder" / "runs").glob("*.json")
+    rec = json.loads(rec_file.read_text())
+    assert rec["outcome"] == "ready" and not rec["pushed"] and rec["source"]["run_id"] == "run-9"
+    assert git(remote, "rev-parse", "refs/heads/main") == main_before          # the worker pushed nothing
+    assert git(remote, "branch", "--list", "agent/*") == ""
+
+    # a person pushes it: re-checked, typed yes, branch + PR
+    out = asyncio.run(push_prepared(rec["branch"], CFG, repo=repo, ask=lambda _: True))
+    assert out["pushed"] and gh.prs and gh.prs[0][0] == rec["branch"]
+    assert git(remote, "rev-parse", "refs/heads/main") == main_before
+    with pytest.raises(SystemExit, match="already pushed"):
+        asyncio.run(push_prepared(rec["branch"], CFG, repo=repo, ask=lambda _: True))
+
+
+def test_push_refuses_a_change_that_no_longer_passes(remote, tmp_path, monkeypatch):
+    import agents.coder.gitops as gitops
+    from agents.coder.graph import push_prepared, run_record, save_record
+    monkeypatch.setattr(gitops, "STATE", tmp_path / "coder")
+    repo = Repo({**CFG, "repo": "o/r"}, "token", github=FakeGH(remote), home=tmp_path / "coder", url=str(remote))
+    repo.sync()
+    branch, path = repo.new_worktree("edited after the agent finished")
+    (path / "tests" / "test_x.py").write_text('NODE = "10.46.252.115"\ndef test_x():\n    assert NODE\n')
+    save_record(run_record({"outcome": "ready", "tests": {"tail": "", "rc": 0}, "report": {}, "summary": "t\nb"},
+                           "task", branch, path, 1, CFG))
+    with pytest.raises(SystemExit, match="no longer passes"):
+        asyncio.run(push_prepared(branch, CFG, repo=repo, ask=lambda _: True))

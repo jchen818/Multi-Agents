@@ -17,6 +17,11 @@ def test_unit_runs_unprivileged_and_restarts():
     assert not re.search(r"(?i)password|token|REDIS_URL=", UNIT)          # secrets stay in agents.env
 
 
+def test_coder_unit_matches_and_never_pushes():
+    c = (REPO / "deploy/systemd/agents-coder-worker@.service").read_text()
+    assert "agents.coder.worker" in c and "NoNewPrivileges=yes" in c and "--push" not in c
+
+
 def test_install_script_parses():
     subprocess.run(["bash", "-n", str(REPO / "deploy/systemd/install.sh")], check=True)
 

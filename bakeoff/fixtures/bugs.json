@@ -1,0 +1,8 @@
+[
+ {"id": 22, "status": "RESOLVED", "summary": "AGFHC hbm_ds_ntd reports HBM miscompare: test reads memory before the pattern is written (all-zero reads)", "component": "Test tools"},
+ {"id": 23, "status": "RESOLVED", "summary": "AGFHC rochpl fails: rocHPL config requests 241.767 GiB device memory, more than usable HBM", "component": "Test tools"},
+ {"id": 24, "status": "RESOLVED", "summary": "RVS gm module (libgm.so) segfaults during rvs_gm in AGFHC all_lvl2", "component": "Test tools"},
+ {"id": 16, "status": "RESOLVED", "summary": "BMC web UI session times out after firmware update", "component": "System"},
+ {"id": 19, "status": "CONFIRMED", "summary": "Fan speed oscillation on PSU 2 under idle", "component": "System"},
+ {"id": 27, "status": "RESOLVED", "summary": "PXE boot fails on second NIC port after BIOS 01.25.06.08", "component": "Firmware"}
+]

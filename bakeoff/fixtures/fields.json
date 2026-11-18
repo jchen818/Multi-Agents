@@ -1,0 +1,3 @@
+{"products": ["G8825Z5U2BC"],
+ "components": ["GPU", "Firmware", "Test tools", "System", "Software stack"],
+ "severities": ["blocker", "critical", "major", "normal", "minor"]}

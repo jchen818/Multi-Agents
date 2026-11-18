@@ -7,3 +7,4 @@ evals/**/results.json
 __pycache__/
 secrets/
 legacy/
+.venv-bakeoff/

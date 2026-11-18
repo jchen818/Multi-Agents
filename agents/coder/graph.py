@@ -18,6 +18,7 @@ The CLI then shows the diff; after a typed "yes" it commits, pushes agent/<slug>
 import argparse
 import asyncio
 import json
+import re
 import os
 import sys
 import time
@@ -122,6 +123,15 @@ def context(ws: Workspace) -> str:
     return "\n\n".join(parts)
 
 
+def existing_test_named(ws: Workspace, text: str) -> str:
+    """'tests/<file>.py::<test>' for the first test the text names that exists in the suite, else ''."""
+    for name in re.findall(r"\btest_\w+", text):
+        for f in sorted((ws.root / "tests").glob("test_*.py")):
+            if re.search(rf"^def {name}\(", f.read_text(errors="replace"), re.M) and not name.endswith("_is_caught"):
+                return f"{ws.rel(f)}::{name}"
+    return ""
+
+
 def known_fields(ws: Workspace) -> set:
     keys = set(ws.recorded_data()[1])
     for p in sorted((ws.root / "config" / "platforms").glob("*.yaml")):
@@ -137,7 +147,10 @@ def build_graph(model, ws: Workspace, cfg: dict, agent_factory=None):
         if killed():
             return {"outcome": "stopped", "reason": "kill switch is set"}
         p = await structured(model, Plan, [("system", SYSTEM),
-                                           ("user", f"{context(ws)}\n\nTask: {state['task']}\n\nPlan the change.")])
+                                           ("user", f"{context(ws)}\n\nTask: {state['task']}\n\nFirst read the existing tests: if one "
+                                                    "already checks exactly what the task asks, set already_covered "
+                                                    "and covered_by to its node id (tests/<file>.py::<test>) and plan "
+                                                    "nothing. Otherwise plan the change.")])
         if p is None:
             return {"outcome": "gave_up", "reason": "no plan from the model"}
         if p.refuse:
@@ -178,6 +191,9 @@ def build_graph(model, ws: Workspace, cfg: dict, agent_factory=None):
                            known_fields=known_fields(ws), na_fields=ws.na_fields())
         problems += rep.problems
         if d.strip() == "(no changes)":
+            covered = existing_test_named(ws, state.get("summary") or "")
+            if covered:          # the model looked and found the check already there: that is an answer, not a failure
+                return {"outcome": "covered", "reason": f"already covered by {covered} (found while coding)"}
             said = " ".join((state.get("summary") or "").split())[:300]
             problems.append(
                 "no files were changed" + (f" (your last message: \"{said}\")" if said else "") + ". You must write "

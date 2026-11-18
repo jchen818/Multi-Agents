@@ -456,3 +456,12 @@ def test_push_refuses_a_change_that_no_longer_passes(remote, tmp_path, monkeypat
                            "task", branch, path, 1, CFG))
     with pytest.raises(SystemExit, match="no longer passes"):
         asyncio.run(push_prepared(branch, CFG, repo=repo, ask=lambda _: True))
+
+
+def test_model_finding_an_existing_test_while_coding_is_covered(mini):
+    nothing = ({}, "No change: test_basic in tests/test_basic.py already checks this.", None)
+    s = run_graph(mini, PLAN, [nothing])
+    assert s["outcome"] == "covered" and "tests/test_basic.py::test_basic" in s["reason"]
+    unknown = ({}, "No change needed, test_does_not_exist covers it.", None)
+    s = run_graph(mini, PLAN, [unknown])
+    assert s["outcome"] == "gave_up"                                 # naming a test that is not there is not enough

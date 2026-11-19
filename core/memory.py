@@ -1,4 +1,11 @@
+import logging
 import os
+
+# mem0 2.x warns on every start that its optional hybrid search (spaCy lemmas, fastembed BM25) is not installed.
+# We use plain vector search on purpose: mem0ai[extras,nlp] pulls torch/CUDA and langchain 0.3, which breaks
+# langchain 1.x. Only mem0 errors are shown.
+logging.getLogger("mem0").setLevel(logging.ERROR)
+
 from mem0 import Memory
 from mem0.embeddings.openai import OpenAIEmbedding
 

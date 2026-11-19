@@ -157,8 +157,11 @@ def _argv(name: str, script: str) -> list:
 
 def _exec(name: str, script: str, timeout: int = 120, stdin: bytes = None):
     env = _sim_env(name) if _node(name).get("sim") else None
+    # Never let a child inherit our stdin: it is the MCP JSON-RPC pipe. With parallel tool calls (the orchestrator's
+    # multi-node fan-out) an inheriting ssh reads other requests off it and the session closes.
+    io = {"input": stdin} if stdin is not None else {"stdin": subprocess.DEVNULL}
     try:
-        p = subprocess.run(_argv(name, script), input=stdin, capture_output=True, timeout=timeout, env=env)
+        p = subprocess.run(_argv(name, script), **io, capture_output=True, timeout=timeout, env=env)
     except subprocess.TimeoutExpired:
         return 124, "", f"timed out after {timeout}s"
     return p.returncode, p.stdout.decode(errors="replace"), p.stderr.decode(errors="replace")
@@ -166,7 +169,7 @@ def _exec(name: str, script: str, timeout: int = 120, stdin: bytes = None):
 
 def _stream_copy(src: str, src_cmd: str, dst: str, dst_cmd: str):
     """Pipe src_cmd's stdout (on src) into dst_cmd (on dst) through this host. Returns (src_rc, dst_rc, bytes, err)."""
-    s = subprocess.Popen(_argv(src, src_cmd), stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+    s = subprocess.Popen(_argv(src, src_cmd), stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                          env=_sim_env(src) if _node(src).get("sim") else None)
     d = subprocess.Popen(_argv(dst, dst_cmd), stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                          env=_sim_env(dst) if _node(dst).get("sim") else None)

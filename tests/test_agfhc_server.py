@@ -155,3 +155,19 @@ def test_live_archive_to_this_host_and_who_may_run(tmp_path, monkeypatch):
     assert "test_node" in mod._runnable("mitacai")                          # not a test node: refused
     assert "not marked" in mod._runnable("local") or mod._runnable("local")  # 'local' can never run AGFHC
     assert "sim" not in mod._nodes()                                         # no simulator in live mode
+
+
+def test_remote_commands_never_inherit_the_mcp_stdin(srv, monkeypatch):
+    """stdin is the MCP pipe; a child that inherits it steals parallel requests (4-node fan-out: Connection closed)."""
+    import subprocess as sp
+    seen = []
+    real = sp.run
+
+    def spy(argv, **kw):
+        seen.append(kw)
+        return real(argv, **kw)
+    monkeypatch.setattr(srv.subprocess, "run", spy)
+    srv._exec("sim", "true")
+    srv._exec("sim", "cat >/dev/null", stdin=b"x")
+    assert seen[0].get("stdin") is sp.DEVNULL and "input" not in seen[0]
+    assert seen[1].get("input") == b"x" and "stdin" not in seen[1]

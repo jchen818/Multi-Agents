@@ -42,7 +42,7 @@ async def build(stack):
     nodes = re.findall(r"^([A-Za-z0-9_.-]+):\s*$", to_text(await lst.ainvoke({})), re.M)
     set_known(nodes=nodes, endpoints=eps)   # guard refuses any other node/endpoint before it reaches a server
     agent = create_agent(
-        get_model(), tools,
+        get_model("lab_ops"), tools,
         system_prompt=PROMPT.format(endpoints=", ".join(eps) or "none", nodes=", ".join(nodes) or "none"),
         middleware=limit_middleware(), checkpointer=InMemorySaver())
     return agent, eps, nodes, len(tools)

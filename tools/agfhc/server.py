@@ -74,6 +74,8 @@ def _sim_dir(name: str) -> Path:
 
 
 def _node(name: str) -> dict:
+    if name == "local":                    # the archive target "this host" (live mode); never a test node
+        return {"ssh_host": "localhost", "local": True}
     nodes = _nodes()
     if name not in nodes:
         raise ValueError(f"unknown node '{name}'. Configured: {', '.join(sorted(nodes))}")
@@ -119,7 +121,10 @@ def _archive_target(name: str) -> dict:
         return {"node": name, "dir": str(_sim_dir(name) / "archive"), "address": "localhost (dry-run)"}
     arch = _config().get("archive") or {}
     if not arch.get("node") or not arch.get("dir"):
-        raise RuntimeError("live archiving needs `archive: {node: <name in nodes>, dir: /srv/nfs/logs}` in config/nodes.yaml")
+        raise RuntimeError("live archiving needs `archive: {node: local, dir: /srv/agent-runs/agfhc}` (this host) or "
+                           "`{node: <name in nodes>, dir: ...}` in config/nodes.yaml")
+    if arch["node"] == "local":
+        return {"node": "local", "dir": arch["dir"].rstrip("/"), "address": getpass.getuser() + "@" + os.uname().nodename}
     return {"node": arch["node"], "dir": arch["dir"].rstrip("/"), "address": _node(arch["node"]).get("ssh_host")}
 
 
@@ -144,7 +149,7 @@ def _sim_exports(name: str = "sim") -> str:
 
 def _argv(name: str, script: str) -> list:
     n = _node(name)
-    if n.get("sim"):
+    if n.get("sim") or n.get("local"):
         return ["bash", "-c", script]
     return ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=10", "-o", "StrictHostKeyChecking=yes",
             f"{n['ssh_user']}@{n['ssh_host']}", "--", "bash -c " + shlex.quote(script)]

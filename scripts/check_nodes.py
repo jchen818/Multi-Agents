@@ -87,9 +87,21 @@ def check(name: str, n: dict, creds: dict) -> list:
     say(OK if o != "none" else WARN, f"amdgpu driver {o if o != 'none' else 'not loaded'}")
     rc, o, _ = ssh(n, "PATH=$PATH:/opt/rocm/bin; amd-smi list 2>/dev/null | grep -c '^GPU:' || true")
     say(OK if o not in ("", "0") else WARN, f"GPUs seen by amd-smi: {o or 0}")
-    rc, o, _ = ssh(n, "sudo -n true 2>/dev/null && echo yes || echo no")
     if n.get("test_node"):
-        say(OK if o == "yes" else BAD, f"passwordless sudo (AGFHC needs it on a test node): {o}")
+        tplf = ROOT / "config" / "plan_templates" / f"{platform}.yaml"
+        a = (yaml.safe_load(tplf.read_text()).get("agfhc") or {}) if tplf.exists() else {}
+        agfhc = a.get("bin", "/opt/amd/agfhc/agfhc")
+        rc, o, e = ssh(n, f"sudo -n {shlex.quote(agfhc)} --version 2>&1 | head -1")
+        say(OK if rc == 0 and o and "password" not in o.lower() else BAD,
+            f"sudo -n {agfhc} --version: {(o or e)[:120]} (a test node needs AGFHC runnable with passwordless sudo)")
+        for tool in ("dmesg", "pkill", "tar"):
+            rc, o, _ = ssh(n, f"sudo -n -l {tool} >/dev/null 2>&1 && echo yes || echo no")
+            if o != "yes":
+                say(BAD, f"passwordless sudo for {tool}: no (see sudoers in the plan template)")
+        rc, o, _ = ssh(n, "PATH=$PATH:/opt/rocm/bin; rocm-smi --showmemuse 2>/dev/null | grep -oE 'VRAM%\\): [0-9]+' "
+                          "| awk '{s+=$2} END {print s+0}'")
+        say(OK if o in ("0", "") else WARN, f"VRAM in use across GPUs (sum of %): {o or 'unknown'} "
+            "(AGFHC refuses to start on busy GPUs)")
 
     # --- IPMI with the agents' account
     cred = creds.get(name)

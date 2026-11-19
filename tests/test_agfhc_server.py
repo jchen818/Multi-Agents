@@ -129,3 +129,29 @@ def test_recipe_missing_from_installed_agfhc_is_refused(srv, monkeypatch, tmp_pa
 def test_versions_include_bios(srv):
     out = run(srv.preflight("sim"))
     assert "| System BIOS | SIM-BIOS-1.0 |" in out
+
+
+def test_live_archive_to_this_host_and_who_may_run(tmp_path, monkeypatch):
+    """Live mode: archives can go to this host ('local'); only nodes marked test_node may run AGFHC."""
+    import importlib.util
+    (tmp_path / "config" / "plan_templates").mkdir(parents=True)
+    (tmp_path / "config" / "plan_templates" / "mi325x.yaml").write_text((REPO / "config/plan_templates/mi325x.yaml").read_text())
+    (tmp_path / "config" / "nodes.yaml").write_text(
+        "nodes:\n  mitacai: {ssh_host: 10.0.0.1, ssh_user: mitac, bmc_host: 10.0.0.2}\n"
+        "  dut1: {ssh_host: dut1, ssh_user: mitac, bmc_host: 10.0.0.3, test_node: true}\n"
+        f"archive: {{node: local, dir: {tmp_path}/archives}}\n")
+    monkeypatch.setenv("MULTI_AGENTS_ROOT", str(tmp_path))
+    monkeypatch.setenv("AGFHC_MODE", "live")
+    spec = importlib.util.spec_from_file_location("agfhc_server_live", REPO / "tools" / "agfhc" / "server.py")
+    mod = importlib.util.module_from_spec(spec)
+    sys.path.insert(0, str(REPO / "tools" / "agfhc"))
+    spec.loader.exec_module(mod)
+    t = mod._archive_target("dut1")
+    assert t["node"] == "local" and t["dir"] == f"{tmp_path}/archives"
+    assert mod._argv("local", "true")[:2] == ["bash", "-c"]                  # archive writes run on this host
+    rc, out, _ = mod._exec("local", "echo $((1+1))")
+    assert (rc, out.strip()) == (0, "2")
+    assert mod._runnable("dut1") == ""
+    assert "test_node" in mod._runnable("mitacai")                          # not a test node: refused
+    assert "not marked" in mod._runnable("local") or mod._runnable("local")  # 'local' can never run AGFHC
+    assert "sim" not in mod._nodes()                                         # no simulator in live mode

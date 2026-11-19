@@ -10,19 +10,27 @@ nodes:
     ssh_user: mitac
     bmc_host: 10.47.20.211
     platform: mi350x
+    test_node: true
   mi350x-2:
     ssh_host: mi350x-2
     ssh_user: mitac
     bmc_host: 10.47.20.226
     platform: mi350x
+    test_node: true
   mi350x-3:
     ssh_host: mi350x-3
     ssh_user: mitac
     bmc_host: 10.47.20.182
     platform: mi350x
+    test_node: true
   mi350x-4:
     ssh_host: mi350x-4
     ssh_user: mitac
     bmc_host: 10.47.20.195
     platform: mi350x
+    test_node: true
 
+
+archive:
+  node: local
+  dir: /home/mitac/Multi-Agents/state/archives/live

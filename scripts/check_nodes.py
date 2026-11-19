@@ -95,9 +95,10 @@ def check(name: str, n: dict, creds: dict) -> list:
     cred = creds.get(name)
     if not cred:
         say(WARN, "IPMI: no entry in secrets/ipmi.yaml (Lab Ops IPMI tools will refuse this node)")
-    elif str(cred.get("ipmi_user", "")).lower() in ("root", "admin", "administrator"):
-        say(BAD, f"IPMI: secrets/ipmi.yaml uses '{cred['ipmi_user']}': use a dedicated USER-privilege account")
     else:
+        if str(cred.get("ipmi_user", "")).lower() in ("root", "admin", "administrator"):
+            say(WARN, f"IPMI: using the BMC's '{cred['ipmi_user']}' account (chosen). Only labcli's three fixed "
+                      "read commands can reach it; keep secrets/ipmi.yaml at mode 600")
         rc, o, e = ipmi(n, cred, "sdr", "type", "Temperature")
         if rc == 0 and o:
             say(OK, f"IPMI read as {cred['ipmi_user']}: {len(o.splitlines())} temperature sensors")
@@ -109,8 +110,7 @@ def check(name: str, n: dict, creds: dict) -> list:
         m = re.search(r"Privilege Level\s*:\s*(\S+)", block)
         if m:
             lvl = m.group(1).upper()
-            say(OK if lvl == "USER" else WARN, f"IPMI privilege of the agents' account: {lvl}"
-                + ("" if lvl == "USER" else " (USER is enough for reads and cannot change power)"))
+            say(OK, f"IPMI privilege of the agents' account: {lvl}")
 
     # --- what the agents can do with it
     tpl = ROOT / "config" / "plan_templates" / f"{platform}.yaml"

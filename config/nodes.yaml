@@ -1,7 +1,28 @@
+
 nodes:
   mitacai:                 # name the agents will use
     ssh_host: 10.46.252.115
     ssh_user: mitac
     bmc_host: 10.46.252.13
   # add one entry per test node
+  mi350x-1:
+    ssh_host: mi350x-1    # internal address, as seen from ubuntu2404
+    ssh_user: mitac
+    bmc_host: 10.47.20.211
+    platform: mi350x
+  mi350x-2:
+    ssh_host: mi350x-2
+    ssh_user: mitac
+    bmc_host: 10.47.20.226
+    platform: mi350x
+  mi350x-3:
+    ssh_host: mi350x-3
+    ssh_user: mitac
+    bmc_host: 10.47.20.182
+    platform: mi350x
+  mi350x-4:
+    ssh_host: mi350x-4
+    ssh_user: mitac
+    bmc_host: 10.47.20.195
+    platform: mi350x
 

@@ -4,19 +4,26 @@
 #                    copy of the newest recording (tamper:), i.e. the check actually checks something.
 #   expect: capture  outcome ready, a new read-only catalog command, its test skips on the recording (re-capture).
 #   expect: refused  the plan refuses; nothing changed.
+#   expect: covered  an existing test already checks this (covered_by): the agent says so and changes nothing.
+# The suite grows: when a task's check gets merged into gpu-validation, turn the task into a `covered` case and add
+# a new task for something the suite does not check yet (Nov 19 2026: power cap, VRAM size, compute units merged).
 # Tamper paths are dotted JSON paths into recordings/<newest>/out/<file>.txt (list indexes as numbers).
 - id: power_cap
   task: Check that every GPU has the same power cap (the socket power limit amd-smi reports).
+  expect: covered
+  covered_by: test_power_cap_is_the_same_on_every_gpu
+- id: vram_vendor
+  task: Check that every GPU reports the same VRAM type and VRAM vendor.
   expect: ready
-  tamper: {file: amdsmi_static, set: {gpu_data.2.limit.ppt0.socket_power_limit.value: 750}}
-- id: vram_size
-  task: Check that every GPU has the platform's VRAM size.
+  tamper: {file: amdsmi_static, set: {gpu_data.4.vram.vendor: MICRON}}
+- id: board_name
+  task: Check that every GPU reports the same board product name.
   expect: ready
-  tamper: {file: amdsmi_static, set: {gpu_data.5.vram.size.value: 131056}}
-- id: compute_units
-  task: Check that every GPU exposes the platform's number of compute units.
+  tamper: {file: amdsmi_static, set: {gpu_data.2.board.product_name: AMD Instinct MI300X OAM}}
+- id: xgmi_bandwidth
+  task: Check that the XGMI links report the same maximum bandwidth on every GPU.
   expect: ready
-  tamper: {file: amdsmi_static, set: {gpu_data.1.asic.num_compute_units: 288}}
+  tamper: {file: amdsmi_xgmi, set: {xgmi_metric.0.5.link_metrics.max_bandwidth.value: 256}}
 - id: numa_split
   task: Check that the GPUs are split evenly across the node's NUMA nodes.
   expect: ready

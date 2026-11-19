@@ -363,6 +363,10 @@ def test_eval_scoring_rules(tmp_path):
     cap = {"outcome": "ready", "report": {"new_tests": ["tests/test_b.py::test_b"], "new_commands": ["bad_pages"]},
            "tests": {"tail": "SKIPPED [1] tests/test_b.py: recording lacks bad_pages: re-capture"}}
     assert score({"expect": "capture"}, cap, tmp_path, CFG)[0]
+    cov = {"expect": "covered", "covered_by": "test_power_cap_is_the_same_on_every_gpu"}
+    assert score(cov, {"outcome": "covered", "reason": "already covered by tests/test_inventory.py::"
+                       "test_power_cap_is_the_same_on_every_gpu"}, tmp_path, CFG)[0]
+    assert not score(cov, {"outcome": "ready", "reason": "", "report": {}}, tmp_path, CFG)[0]
 
 
 def test_failure_messages_reach_the_model(mini):

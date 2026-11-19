@@ -24,7 +24,7 @@ from agents.coder.graph import last_feedback, load_cfg, run  # noqa: E402
 from agents.coder.sandbox import failed_tests, run_pytest  # noqa: E402
 
 TASKS = Path(__file__).with_name("tasks.yaml")
-PASS_MIN = 7          # of 9
+PASS_MIN = 8          # of 10
 
 
 def set_path(doc, dotted: str, value):
@@ -53,6 +53,9 @@ def score(case: dict, state: dict, path: Path, cfg: dict, runner=run_pytest) -> 
     rep = state.get("report") or {}
     if exp == "refused":
         return out == "refused", f"outcome {out}: {state.get('reason', '')[:100]}"
+    if exp == "covered":
+        ok = out == "covered" and case["covered_by"] in state.get("reason", "")
+        return ok, f"outcome {out}: {state.get('reason', '')[:120]}"
     if out != "ready":
         return False, f"outcome {out}: {state.get('reason', '')[:100]}"
     checks_ = [t for t in rep.get("new_tests", []) if not t.startswith("tests/test_checks_catch.py")]
@@ -100,12 +103,12 @@ async def main():
         if not args.keep:
             repo.drop(path, branch)
     n = sum(r["ok"] for r in rows)
-    print(f"\ncoder eval {n}/{len(rows)}" + (f" (gate needs {PASS_MIN}/9)" if len(rows) == 9 else ""))
+    print(f"\ncoder eval {n}/{len(rows)}" + (f" (gate needs {PASS_MIN}/10)" if len(rows) == 10 else ""))
     out = STATE / "eval" / f"{time.strftime('%Y%m%d-%H%M%S')}.json"
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(json.dumps(rows, indent=1))
     print(f"saved {out}")
-    sys.exit(0 if len(rows) < 9 or n >= PASS_MIN else 1)
+    sys.exit(0 if len(rows) < 10 or n >= PASS_MIN else 1)
 
 
 if __name__ == "__main__":

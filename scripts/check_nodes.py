@@ -75,11 +75,14 @@ def check(name: str, n: dict, creds: dict) -> list:
         say(BAD, f"ssh {n['ssh_user']}@{n['ssh_host']}: {(e or o)[:200]}")
         return out
     say(OK, f"ssh as the agents run it -> {o}")
-    rc, o, _ = ssh(n, "cat /opt/rocm/.info/version 2>/dev/null || ls -d /opt/rocm* 2>/dev/null | tr '\\n' ' '")
+    rc, o, _ = ssh(n, "cat /opt/rocm/.info/version 2>/dev/null")
     if o and re.match(r"^\d+\.\d+", o):
         say(OK, f"ROCm {o}")
     else:
-        say(WARN, f"no /opt/rocm/.info/version ({o or 'no /opt/rocm*'}): GPU reads and AGFHC will not work yet")
+        rc2, o2, _ = ssh(n, "ls -d /opt/rocm* 2>/dev/null | tr '\\n' ' '; echo '|'; ls /opt/rocm/.info 2>/dev/null | tr '\\n' ' '")
+        dirs, info = (o2.split("|") + [""])[:2]
+        say(WARN, f"no /opt/rocm/.info/version (ROCm dirs: {dirs.strip() or 'none'}; .info has: "
+                  f"{info.strip() or 'nothing'}): the agents read the ROCm version from that file")
     rc, o, _ = ssh(n, "cat /sys/module/amdgpu/version 2>/dev/null || echo none")
     say(OK if o != "none" else WARN, f"amdgpu driver {o if o != 'none' else 'not loaded'}")
     rc, o, _ = ssh(n, "PATH=$PATH:/opt/rocm/bin; amd-smi list 2>/dev/null | grep -c '^GPU:' || true")

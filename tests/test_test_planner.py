@@ -266,3 +266,18 @@ def test_rerun_of_same_recipe_updates_history_not_a_new_file(env, monkeypatch):
     g3 = build_graph(env["tools"], m3, m3, InMemorySaver(), poll_s=0.5, recipes=env["store"])
     drive(g3, {"requirements": "quick health check", "node": "sim"}, [{"action": "approve"}], thread="t3")
     assert len(recipe_files(env["store"])) == 2
+
+
+def test_every_plan_template_is_consistent():
+    """Each tier recipe is allowlisted, and the agfhc block has what the executor formats."""
+    import yaml
+    from pathlib import Path
+    for p in sorted((Path(__file__).resolve().parents[1] / "config" / "plan_templates").glob("*.yaml")):
+        t = yaml.safe_load(p.read_text())
+        assert t["platform"] == p.stem, p
+        allowed = set(t["allowed_recipes"])
+        for tier in t["tiers"].values():
+            for r in tier["recipes"]:
+                assert r["name"] in allowed, (p.name, r["name"])
+        for k in ("bin", "run_cmd", "list_cmd", "version_cmd", "log_root", "run_root"):
+            assert t["agfhc"][k], (p.name, k)

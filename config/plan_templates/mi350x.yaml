@@ -1,0 +1,116 @@
+# MI350X validation plan template - source for the Phase 2 planner.
+# Recipes and tests are from `agfhc -l` on mi350x-4, Nov 19 2026 (AGFHC 1.33.6, package mi300,
+# tests under /opt/amd/agfhc/agfhc/tests/mi350x, recipes under /opt/amd/agfhc/agfhc/recipes/mi350x).
+# The bundled tools live under /opt/amd/agfhc/<tool>; the tests call /opt/amd/transferbench/TransferBench, so each
+# node has the symlink /opt/amd/transferbench -> /opt/amd/agfhc/transferbench.
+# Durations are AGFHC's own recipe titles ("~5m", "~1h"); recipes without one show "unknown" and the planner
+# reads the real test list (list_recipe_tests) before asking for approval.
+platform: mi350x
+# No target stack is pinned here: AGFHC, ROCm, amdgpu and BKC/BIOS change together and are read live at preflight,
+# shown in the plan and recorded with every run and recipe.
+
+agfhc:
+  bin: /opt/amd/agfhc/agfhc/agfhc
+  run_cmd: "{bin} -r {recipe} {extra}"
+  list_cmd: "{bin} --list"
+  version_cmd: "{bin} --version"
+  log_root: /root/agfhc/logs              # AGFHC writes agfhc_<YYYYmmdd-HHMMSS>/ here (results.json, error.json, tests/)
+  run_root: /var/tmp/agfhc-runs           # per-run dir on the DUT: console.log, rc, versions.txt, inventory.tsv, ...
+  sudoers: "<user> ALL=(root) NOPASSWD: /opt/amd/agfhc/agfhc/agfhc, /usr/bin/dmesg, /usr/bin/pkill, /usr/bin/tar"
+
+archive:                                # live target is set per lab in config/nodes.yaml (`archive: {node: local, dir: ...}`)
+  timezone: America/Los_Angeles
+
+# Hard preconditions - the executor refuses to start if any fails (the Open WebUI tool only warned).
+preconditions:
+  - id: test_node
+    rule: "node is marked `test_node: true` in config/nodes.yaml (never mitacai or other infra hosts)"
+  - id: gpus_idle
+    rule: "every GPU < 5% VRAM allocated and no KFD processes (rocm-smi --showmemuse / --showpids)"
+  - id: no_active_run
+    rule: "no /var/tmp/agfhc-runs/.host.lock on the node"
+  - id: versions_recorded
+    rule: "AGFHC, ROCm, amdgpu, amd-smi, kernel, OS, GPU model/count, VBIOS read live and shown in the plan"
+  - id: kernel_clean
+    rule: "no amdgpu/RAS/AER/XGMI/MCE errors in dmesg before start (reported; operator decides at approval)"
+
+# Plan stages. The planner picks a tier per the request; gates run before and after AGFHC.
+stages:
+  - id: preflight
+    action: preflight            # versions table, GPU idle check, active-run lock, recent kernel errors
+  - id: gate_before
+    action: pytest_suite         # gpu-automation-test TC-GPU-001..005 (enumeration, ISA, idle health, VRAM, topology)
+    on_fail: stop                # don't stress a node that fails the basic checks
+  - id: agfhc
+    action: agfhc_recipes        # one or more recipes from the chosen tier, one at a time (one run per host)
+    on_fail: continue_then_analyze
+  - id: gate_after
+    action: pytest_suite
+  - id: report
+    action: analyze_and_archive  # analyze, archive to NFS, report.html with the agent's analysis
+
+tiers:
+  smoke:
+    purpose: quick health check after bring-up or a driver/firmware change
+    recipes:
+      - {name: all_lvl1, duration: ~5m, title: "A ~5m check across system"}
+  subsystem_lvl1:
+    purpose: ~5 min per subsystem, to localize a problem
+    recipes:
+      - {name: hbm_lvl1, duration: ~5m}
+      - {name: xgmi_lvl1, duration: ~5m}
+      - {name: pcie_lvl1, duration: ~5m}
+      - {name: dma_lvl1, duration: ~5m}
+      - {name: gfx_lvl1, duration: ~5m}
+      - {name: acf_lvl1, duration: ~5m}
+  functional:
+    purpose: every test once, thermal solution
+    recipes:
+      - {name: single_pass, duration: unknown, title: "Run all tests once"}
+      - {name: thermal, duration: unknown, title: "Verify thermal solution"}
+  standard:
+    purpose: validation campaign default
+    recipes:
+      - {name: all_lvl2, duration: ~10m}
+      - {name: all_lvl3, duration: ~30m}
+  extended:
+    purpose: longer stress before sign-off
+    recipes:
+      - {name: all_lvl4, duration: ~1h}
+      - {name: all_lvl5, duration: ~2h}
+  subsystem_deep:
+    purpose: one subsystem at length, after a lvl1 points at it
+    recipes:
+      - {name: hbm_lvl4, duration: ~1h}
+      - {name: hbm_lvl5, duration: ~2h}
+      - {name: xgmi_lvl4, duration: ~1h}
+      - {name: pcie_lvl4, duration: ~1h}
+      - {name: dma_lvl4, duration: ~1h}
+      - {name: gfx_lvl4, duration: ~1h}
+      - {name: acf_lvl4, duration: ~60m}
+  performance:
+    purpose: bandwidth / compute performance
+    recipes:
+      - {name: all_perf, duration: unknown, title: "Run all performance based tests"}
+# No burn-in recipes ship for mi350x in AGFHC 1.33.6.
+
+# Allowlist = the recipes the agents may run (a safety ceiling). plan_run also refuses a recipe the node's installed
+# AGFHC does not define (live `agfhc --list`), so a version change can only narrow this, never widen it.
+# Taken from AGFHC 1.33.6 (33 recipes); after an upgrade that adds recipes, add them here deliberately.
+allowed_recipes: [
+  acf_lvl1, acf_lvl2, acf_lvl3, acf_lvl4,
+  all_lvl1, all_lvl2, all_lvl3, all_lvl4, all_lvl5, all_perf,
+  dma_lvl1, dma_lvl2, dma_lvl3, dma_lvl4,
+  gfx_lvl1, gfx_lvl2, gfx_lvl3, gfx_lvl4,
+  hbm_lvl1, hbm_lvl2, hbm_lvl3, hbm_lvl4, hbm_lvl5,
+  pcie_lvl1, pcie_lvl2, pcie_lvl3, pcie_lvl4,
+  single_pass, thermal,
+  xgmi_lvl1, xgmi_lvl2, xgmi_lvl3, xgmi_lvl4]
+
+# The 43 AGFHC tests for mi350x (for planner context and triage).
+tests: [achilles, athub, dma_bidi_peak, dma_d2h_peak, dma_h2d_peak, driftcheck, edp, gfx_bf16ri, gfx_bf16tf,
+        gfx_bf8ri, gfx_bf8tf, gfx_fp16ri, gfx_fp16tf, gfx_fp4tf, gfx_fp6tf, gfx_fp8ri, gfx_fp8tf, gfx_maxpower,
+        hbm, hbm_bw, hbm_ds, hbm_ds_ntd, hbm_remix2, hbm_s16, hbm_s16_ds, mall,
+        memrocker_2.2, memrocker_3.1, memrocker_405.18, memrocker_405.20, memrocker_407.2, memrocker_700.1,
+        minihpl, pcie_d2h_peak, pcie_h2d_peak, pcie_link_status, roccrush, roctwitch, sleep, sprites,
+        ubb_power_ms, ubb_power_us, xgmi_a2a]

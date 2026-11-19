@@ -93,7 +93,9 @@ def check(name: str, n: dict, creds: dict) -> list:
 
     # --- IPMI with the agents' account
     cred = creds.get(name)
-    if not cred:
+    if not n.get("bmc_host"):
+        say(BAD, "IPMI: no bmc_host in config/nodes.yaml for this node")
+    elif not cred:
         say(WARN, "IPMI: no entry in secrets/ipmi.yaml (Lab Ops IPMI tools will refuse this node)")
     else:
         if str(cred.get("ipmi_user", "")).lower() in ("root", "admin", "administrator"):

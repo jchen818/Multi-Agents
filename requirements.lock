@@ -24,6 +24,7 @@ httpx2==2.16.0
 httpx==0.28.1
 hyperframe==6.1.0
 idna==3.20
+iniconfig==2.3.1
 jiter==0.19.0
 jsonpatch==1.47
 jsonpointer==3.12
@@ -57,6 +58,7 @@ opentelemetry-semantic-conventions==0.66b2
 orjson==3.13.0
 ormsgpack==1.13.1
 packaging==26.3
+pluggy==1.7.0
 portalocker==4.4.2
 posthog==7.87.0
 protobuf==6.33.6
@@ -64,7 +66,9 @@ pycparser==3.12
 pydantic-settings==2.16.2
 pydantic==2.14.3
 pydantic_core==2.50.4
+Pygments==2.21.0
 PyJWT==2.15.1
+pytest==9.2.0
 python-dotenv==1.2.4
 python-multipart==0.0.33
 pytz==2026.6
